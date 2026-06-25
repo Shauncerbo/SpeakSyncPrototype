@@ -21,7 +21,6 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   String _speechType = 'Prepared';
-  String _languageMode = 'Mixed Language';
   String _duration = '3 minutes';
   bool _body = true;
   bool _fillers = true;
@@ -33,12 +32,6 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
     'Impromptu',
     'Informative',
     'Persuasive',
-  ];
-  static const _languages = [
-    'English',
-    'English–Filipino',
-    'English–Bisaya',
-    'Mixed Language',
   ];
   static const _durations = [
     '1 minute',
@@ -59,7 +52,6 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
     final settings = PracticeSettings(
       speechTitle: _titleController.text.trim(),
       speechType: _speechType,
-      languageMode: _languageMode,
       selectedDuration: _duration,
       monitorBodyLanguage: _body,
       monitorFillers: _fillers,
@@ -128,13 +120,11 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                     onChanged: (value) => setState(() => _speechType = value),
                   ),
                   const SizedBox(height: 16),
-                  _DropdownField(
-                    key: const Key('language_mode'),
-                    label: 'Language mode',
-                    icon: Icons.translate_rounded,
-                    value: _languageMode,
-                    items: _languages,
-                    onChanged: (value) => setState(() => _languageMode = value),
+                  const InfoBanner(
+                    icon: Icons.language_rounded,
+                    title: 'Code-switched speech',
+                    message: 'Filler word detection supports English, Filipino, and Bisaya code-switched speech automatically.',
+                    color: primaryBlue,
                   ),
                   const SizedBox(height: 16),
                   _DropdownField(
@@ -458,6 +448,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   final Map<String, int> _fillers = {};
   String? _alert;
   Color _alertColor = primaryBlue;
+  final List<int> _paceHistory = [130];
 
   int get _fillerTotal =>
       _fillers.values.fold<int>(0, (total, value) => total + value);
@@ -467,7 +458,16 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     super.initState();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && !_paused) {
-        setState(() => _elapsedSeconds++);
+        setState(() {
+          _elapsedSeconds++;
+          if (_elapsedSeconds % 10 == 0) {
+            int newPace = 110 + (DateTime.now().millisecondsSinceEpoch % 40);
+            if (_pace == 'Too Fast') {
+              newPace = 160 + (DateTime.now().millisecondsSinceEpoch % 20);
+            }
+            _paceHistory.add(newPace);
+          }
+        });
       }
     });
   }
@@ -485,7 +485,14 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
 
   void _addFiller(String filler) {
     setState(() => _fillers[filler] = (_fillers[filler] ?? 0) + 1);
-    _showAlert('$filler detected', warningOrange);
+    _showAlert('Filler detected: \'$filler\'', warningOrange);
+  }
+
+  void _simulateLocalizedFiller() {
+    final fillers = <String>['ano', 'parang', 'kasi', 'kuan', 'kanang', "mura'g", 'bitaw', 'um', 'like'];
+
+    final randomFiller = fillers[DateTime.now().microsecondsSinceEpoch % fillers.length];
+    _addFiller(randomFiller);
   }
 
   void _simulatePoorPosture() {
@@ -543,7 +550,6 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       id: 'session-${DateTime.now().microsecondsSinceEpoch}',
       title: setup.speechTitle,
       speechType: setup.speechType,
-      languageMode: setup.languageMode,
       dateTime: DateTime.now(),
       duration: Duration(seconds: _elapsedSeconds),
       overallScore: overall,
@@ -552,6 +558,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       postureScore: _posture == 'Good' ? 95 : 72,
       attentionScore: _attention,
       fillerCounts: Map.unmodifiable(_fillers),
+      paceHistory: List.unmodifiable(_paceHistory),
       coachingTips: _buildTips(),
       isPrototypeData: true,
     );
@@ -850,14 +857,9 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                             runSpacing: 8,
                             children: [
                               _DemoButton(
-                                key: const Key('simulate_kuan'),
-                                label: 'Simulate Kuan',
-                                onPressed: () => _addFiller('Kuan'),
-                              ),
-                              _DemoButton(
-                                key: const Key('simulate_ano'),
-                                label: 'Simulate Ano',
-                                onPressed: () => _addFiller('Ano'),
+                                key: const Key('simulate_filler'),
+                                label: 'Simulate Filler',
+                                onPressed: _simulateLocalizedFiller,
                               ),
                               _DemoButton(
                                 key: const Key('simulate_poor_posture'),
@@ -1090,6 +1092,14 @@ class AnalyzingScreen extends StatefulWidget {
 
 class _AnalyzingScreenState extends State<AnalyzingScreen> {
   Timer? _timer;
+  Timer? _textTimer;
+  int _textIndex = 0;
+  final List<String> _steps = [
+    'Transcribing audio...',
+    'Detecting filler words...',
+    'Analyzing posture...',
+    'Finalizing report...',
+  ];
 
   @override
   void didChangeDependencies() {
@@ -1100,11 +1110,17 @@ class _AnalyzingScreenState extends State<AnalyzingScreen> {
         MaterialPageRoute<void>(builder: (_) => const ReportScreen()),
       );
     });
+    _textTimer ??= Timer.periodic(const Duration(milliseconds: 1200), (_) {
+      if (mounted) {
+        setState(() => _textIndex = (_textIndex + 1) % _steps.length);
+      }
+    });
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _textTimer?.cancel();
     super.dispose();
   }
 
@@ -1133,13 +1149,17 @@ class _AnalyzingScreenState extends State<AnalyzingScreen> {
                     ),
                   ),
                   const SizedBox(height: 34),
-                  const Text(
-                    'Preparing your performance report...',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: navy,
-                      fontSize: 25,
-                      fontWeight: FontWeight.w900,
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    child: Text(
+                      _steps[_textIndex],
+                      key: ValueKey(_textIndex),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: navy,
+                        fontSize: 25,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -1312,6 +1332,7 @@ class _ReportScreenState extends State<ReportScreen> {
                   status: report.postureScore >= 80
                       ? 'Good'
                       : 'Needs Correction',
+                  extra: StarRating(rating: (report.postureScore / 20).round()),
                 ),
                 const SizedBox(height: 10),
                 _ScoreRow(
@@ -1319,6 +1340,16 @@ class _ReportScreenState extends State<ReportScreen> {
                   label: 'Camera Attention',
                   score: report.attentionScore,
                   status: '${report.attentionScore}%',
+                  extra: StarRating(rating: (report.attentionScore / 20).round()),
+                ),
+                const SizedBox(height: 28),
+                const SectionHeader('Speaking pace'),
+                const SizedBox(height: 12),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: PaceLineChart(paceHistory: report.paceHistory),
+                  ),
                 ),
                 const SizedBox(height: 28),
                 const SectionHeader('Filler frequencies'),
@@ -1334,50 +1365,7 @@ class _ReportScreenState extends State<ReportScreen> {
                               height: 1.45,
                             ),
                           )
-                        : Column(
-                            children: fillers
-                                .map(
-                                  (entry) => Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 7,
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        CircleAvatar(
-                                          radius: 17,
-                                          backgroundColor: warningOrange
-                                              .withValues(alpha: .1),
-                                          foregroundColor: warningOrange,
-                                          child: Text(
-                                            '${entry.value}',
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w800,
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: Text(
-                                            entry.key,
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                        ),
-                                        Text(
-                                          entry.value == 1
-                                              ? '1 time'
-                                              : '${entry.value} times',
-                                          style: const TextStyle(
-                                            color: Color(0xFF617085),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                )
-                                .toList(),
-                          ),
+                        : FillerBarChart(fillerCounts: Map.fromEntries(fillers)),
                   ),
                 ),
                 const SizedBox(height: 28),
@@ -1447,11 +1435,13 @@ class _ScoreRow extends StatelessWidget {
     required this.label,
     required this.score,
     required this.status,
+    this.extra,
   });
   final IconData icon;
   final String label;
   final int score;
   final String status;
+  final Widget? extra;
 
   @override
   Widget build(BuildContext context) {
@@ -1490,6 +1480,10 @@ class _ScoreRow extends StatelessWidget {
                       fontSize: 13,
                     ),
                   ),
+                  if (extra != null) ...[
+                    const SizedBox(height: 4),
+                    extra!,
+                  ],
                 ],
               ),
             ),

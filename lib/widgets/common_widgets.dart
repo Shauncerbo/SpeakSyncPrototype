@@ -521,3 +521,168 @@ class ListEquality {
     return true;
   }
 }
+
+class StarRating extends StatelessWidget {
+  const StarRating({super.key, required this.rating, this.maxRating = 5});
+  final int rating;
+  final int maxRating;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(maxRating, (index) {
+        return Icon(
+          index < rating ? Icons.star_rounded : Icons.star_border_rounded,
+          color: warningOrange,
+          size: 20,
+        );
+      }),
+    );
+  }
+}
+
+class FillerBarChart extends StatelessWidget {
+  const FillerBarChart({super.key, required this.fillerCounts});
+  final Map<String, int> fillerCounts;
+
+  @override
+  Widget build(BuildContext context) {
+    if (fillerCounts.isEmpty) return const SizedBox.shrink();
+    final maxCount = fillerCounts.values.reduce(math.max);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Column(
+          children: fillerCounts.entries.map((entry) {
+            final percentage = maxCount > 0 ? entry.value / maxCount : 0.0;
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 65,
+                    child: Text(
+                      entry.key,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Stack(
+                      alignment: Alignment.centerLeft,
+                      children: [
+                        Container(
+                          height: 12,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE4EAF2),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                        ),
+                        FractionallySizedBox(
+                          widthFactor: percentage,
+                          child: Container(
+                            height: 12,
+                            decoration: BoxDecoration(
+                              color: warningOrange,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 28,
+                    child: Text(
+                      '${entry.value}',
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: navy,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
+}
+
+class PaceLineChart extends StatelessWidget {
+  const PaceLineChart({super.key, required this.paceHistory});
+  final List<int> paceHistory;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'Line chart showing simulated speaking pace over time',
+      child: SizedBox(
+        height: 140,
+        width: double.infinity,
+        child: CustomPaint(painter: _PaceLineChartPainter(paceHistory)),
+      ),
+    );
+  }
+}
+
+class _PaceLineChartPainter extends CustomPainter {
+  _PaceLineChartPainter(this.paceHistory);
+  final List<int> paceHistory;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (paceHistory.isEmpty) return;
+    final gridPaint = Paint()
+      ..color = const Color(0xFFE4EAF2)
+      ..strokeWidth = 1;
+    for (var i = 0; i < 4; i++) {
+      final y = 10 + (size.height - 20) * i / 3;
+      canvas.drawLine(Offset(10, y), Offset(size.width - 10, y), gridPaint);
+    }
+
+    final path = Path();
+    final pointPaint = Paint()..color = primaryBlue;
+    final linePaint = Paint()
+      ..color = primaryBlue
+      ..strokeWidth = 2.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    final points = <Offset>[];
+    double minPace = 80;
+    double maxPace = 180;
+    for (var i = 0; i < paceHistory.length; i++) {
+      final x = paceHistory.length == 1
+          ? size.width / 2
+          : 14 + (size.width - 28) * i / (paceHistory.length - 1);
+      final normalized = (paceHistory[i].clamp(minPace, maxPace) - minPace) / (maxPace - minPace);
+      final y = size.height - 10 - normalized * (size.height - 20);
+      points.add(Offset(x, y));
+    }
+
+    if (points.length == 1) {
+      canvas.drawCircle(points.first, 4, pointPaint);
+      return;
+    }
+
+    path.moveTo(points.first.dx, points.first.dy);
+    for (final point in points.skip(1)) {
+      path.lineTo(point.dx, point.dy);
+    }
+    canvas.drawPath(path, linePaint);
+    for (final point in points) {
+      canvas.drawCircle(point, 5, Paint()..color = Colors.white);
+      canvas.drawCircle(point, 3, pointPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_PaceLineChartPainter oldDelegate) =>
+      !const ListEquality().equals(oldDelegate.paceHistory, paceHistory);
+}
