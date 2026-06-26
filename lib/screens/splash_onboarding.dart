@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../app.dart';
 import '../core/app_theme.dart';
+import '../login.dart';
 import '../widgets/common_widgets.dart';
 import 'main_shell.dart';
 
@@ -118,7 +119,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   void _finish() {
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute<void>(builder: (_) => const MainShell()),
+      MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
       (route) => false,
     );
   }

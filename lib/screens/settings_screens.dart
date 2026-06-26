@@ -4,6 +4,7 @@ import '../core/app_theme.dart';
 import '../models/app_preferences.dart';
 import '../state/app_state.dart';
 import '../widgets/common_widgets.dart';
+import '../login.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -68,6 +69,32 @@ class SettingsScreen extends StatelessWidget {
     AppStateScope.of(context, listen: false).reset();
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Prototype data has been reset.')),
+    );
+  }
+
+  Future<void> _logout(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Log out?'),
+        content: const Text('Are you sure you want to log out of SpeakSync?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: errorRed),
+            child: const Text('Log out'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
+      (route) => false,
     );
   }
 
@@ -278,6 +305,18 @@ class SettingsScreen extends StatelessWidget {
                         style: TextStyle(color: errorRed),
                       ),
                       onTap: () => _reset(context),
+                    ),
+                    const Divider(height: 1, indent: 16, endIndent: 16),
+                    ListTile(
+                      leading: const Icon(
+                        Icons.logout_rounded,
+                        color: errorRed,
+                      ),
+                      title: const Text(
+                        'Log out',
+                        style: TextStyle(color: errorRed),
+                      ),
+                      onTap: () => _logout(context),
                     ),
                   ],
                 ),
