@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-
 import 'core/app_theme.dart';
-import 'screens/splash_onboarding.dart';
 import 'state/app_state.dart';
+import 'login.dart'; 
 
 class SpeakSyncApp extends StatelessWidget {
   const SpeakSyncApp({
@@ -30,12 +29,42 @@ class SpeakSyncApp extends StatelessWidget {
           title: 'SpeakSync',
           debugShowCheckedModeBanner: false,
           theme: buildAppTheme(),
-          home: const SplashScreen(),
+          
+          // 2. CHANGE THIS FROM SplashScreen() TO LoginScreen()
+          home: const LoginScreen(), 
+
+          // 3. ADD THIS ROUTES BLOCK
+          // This prevents the app from crashing when you press the "Sign In" button!
+          routes: {
+            '/home': (context) => const DummyDashboardScreen(), 
+          },
         ),
       ),
     );
   }
 }
+
+// -------------------------------------------------------------
+// 4. A TEMPORARY TEMPLATE HOME SCREEN 
+// This gives your successful login a place to land until you build your real dashboard!
+class DummyDashboardScreen extends StatelessWidget {
+  const DummyDashboardScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('SpeakSync Dashboard')),
+      body: const Center(
+        child: Text(
+          'Welcome to the SpeakSync Dashboard!\n(Success: Login Bypassed Successfully)',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+  }
+}
+// -------------------------------------------------------------
 
 class AppTimingScope extends InheritedWidget {
   const AppTimingScope({

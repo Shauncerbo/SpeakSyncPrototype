@@ -158,7 +158,7 @@ class SessionDetailsScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 5),
                       Text(
-                        session.speechType,
+                        '${session.speechType} • ${session.languageMode}',
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: accentTeal,
@@ -177,24 +177,10 @@ class SessionDetailsScreen extends StatelessWidget {
                   label: 'Filler Control',
                   value: session.fillerScore,
                 ),
-                _DetailScore(
-                  label: 'Posture',
-                  value: session.postureScore,
-                  extra: StarRating(rating: (session.postureScore / 20).round()),
-                ),
+                _DetailScore(label: 'Posture', value: session.postureScore),
                 _DetailScore(
                   label: 'Camera Attention',
                   value: session.attentionScore,
-                  extra: StarRating(rating: (session.attentionScore / 20).round()),
-                ),
-                const SizedBox(height: 26),
-                const SectionHeader('Speaking pace'),
-                const SizedBox(height: 12),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: PaceLineChart(paceHistory: session.paceHistory),
-                  ),
                 ),
                 const SizedBox(height: 26),
                 const SectionHeader('Filler frequencies'),
@@ -204,7 +190,33 @@ class SessionDetailsScreen extends StatelessWidget {
                     padding: const EdgeInsets.all(16),
                     child: fillers.isEmpty
                         ? const Text('No selected filler words were detected.')
-                        : FillerBarChart(fillerCounts: Map.fromEntries(fillers)),
+                        : Column(
+                            children: fillers
+                                .map(
+                                  (entry) => ListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    leading: CircleAvatar(
+                                      backgroundColor: warningOrange.withValues(
+                                        alpha: .1,
+                                      ),
+                                      foregroundColor: warningOrange,
+                                      child: Text('${entry.value}'),
+                                    ),
+                                    title: Text(
+                                      entry.key,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    trailing: Text(
+                                      entry.value == 1
+                                          ? '1 time'
+                                          : '${entry.value} times',
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                          ),
                   ),
                 ),
                 const SizedBox(height: 26),
@@ -251,10 +263,9 @@ class SessionDetailsScreen extends StatelessWidget {
 }
 
 class _DetailScore extends StatelessWidget {
-  const _DetailScore({required this.label, required this.value, this.extra});
+  const _DetailScore({required this.label, required this.value});
   final String label;
   final int value;
-  final Widget? extra;
 
   @override
   Widget build(BuildContext context) {
@@ -291,10 +302,6 @@ class _DetailScore extends StatelessWidget {
               backgroundColor: const Color(0xFFE4EAF2),
             ),
           ),
-          if (extra != null) ...[
-            const SizedBox(height: 8),
-            extra!,
-          ],
         ],
       ),
     );

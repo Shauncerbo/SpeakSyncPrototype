@@ -2,6 +2,7 @@ import '../models/app_preferences.dart';
 import '../models/practice_session.dart';
 
 const initialPreferences = AppPreferences(
+  defaultLanguage: 'Mixed Language',
   defaultDuration: '3 minutes',
   liveFeedback: true,
   vibrationFeedback: false,
@@ -13,16 +14,16 @@ List<PracticeSession> initialSessions() => [
   PracticeSession(
     id: 'initial-1',
     title: 'Climate Change Speech',
-    speechType: 'Prepared',
-    dateTime: DateTime(2026, 6, 20),
+    speechType: 'Persuasive',
+    languageMode: 'English–Filipino',
+    dateTime: DateTime(2026, 6, 18),
     duration: const Duration(minutes: 6, seconds: 20),
     overallScore: 82,
     paceScore: 84,
     fillerScore: 78,
     postureScore: 86,
     attentionScore: 80,
-    fillerCounts: const {'ano': 3, 'kasi': 1},
-    paceHistory: const [130, 135, 140, 128, 120, 125, 130, 132],
+    fillerCounts: const {'Kuan': 3, 'Ano': 1},
     coachingTips: const [
       'Pause briefly instead of using a filler word.',
       'Keep your eyes near the camera during key points.',
@@ -33,6 +34,7 @@ List<PracticeSession> initialSessions() => [
     id: 'initial-2',
     title: 'Technology and Education',
     speechType: 'Informative',
+    languageMode: 'English',
     dateTime: DateTime(2026, 6, 16),
     duration: const Duration(minutes: 5, seconds: 45),
     overallScore: 76,
@@ -40,8 +42,7 @@ List<PracticeSession> initialSessions() => [
     fillerScore: 75,
     postureScore: 82,
     attentionScore: 74,
-    fillerCounts: const {'um': 2, 'like': 2},
-    paceHistory: const [145, 150, 155, 160, 150, 145],
+    fillerCounts: const {'Um': 2, 'Kuan': 2},
     coachingTips: const [
       'Slow down around important ideas.',
       'Use a steady stance to support your delivery.',
@@ -52,6 +53,7 @@ List<PracticeSession> initialSessions() => [
     id: 'initial-3',
     title: 'Impromptu Practice',
     speechType: 'Impromptu',
+    languageMode: 'Mixed Language',
     dateTime: DateTime(2026, 6, 14),
     duration: const Duration(minutes: 4, seconds: 10),
     overallScore: 71,
@@ -59,8 +61,7 @@ List<PracticeSession> initialSessions() => [
     fillerScore: 66,
     postureScore: 78,
     attentionScore: 72,
-    fillerCounts: const {'kuan': 4, 'ano': 2, 'parang': 1},
-    paceHistory: const [110, 115, 120, 118, 122],
+    fillerCounts: const {'Kuan': 4, 'Ano': 2},
     coachingTips: const [
       'Take one planning breath before answering.',
       'Replace fillers with a quiet pause.',
@@ -71,6 +72,7 @@ List<PracticeSession> initialSessions() => [
     id: 'initial-4',
     title: 'Environmental Awareness',
     speechType: 'Prepared',
+    languageMode: 'English–Bisaya',
     dateTime: DateTime(2026, 6, 12),
     duration: const Duration(minutes: 5, seconds: 5),
     overallScore: 68,
@@ -78,8 +80,7 @@ List<PracticeSession> initialSessions() => [
     fillerScore: 64,
     postureScore: 69,
     attentionScore: 67,
-    fillerCounts: const {'kuan': 3, 'bitaw': 2, 'kanang': 1},
-    paceHistory: const [140, 138, 135, 142, 145, 148],
+    fillerCounts: const {'Kuan': 5},
     coachingTips: const [
       'Square your shoulders and keep your upper body relaxed.',
       'Look toward the camera at the end of each thought.',

@@ -3,6 +3,7 @@ class PracticeSession {
     required this.id,
     required this.title,
     required this.speechType,
+    required this.languageMode,
     required this.dateTime,
     required this.duration,
     required this.overallScore,
@@ -11,7 +12,6 @@ class PracticeSession {
     required this.postureScore,
     required this.attentionScore,
     required this.fillerCounts,
-    required this.paceHistory,
     required this.coachingTips,
     required this.isPrototypeData,
   });
@@ -19,6 +19,7 @@ class PracticeSession {
   final String id;
   final String title;
   final String speechType;
+  final String languageMode;
   final DateTime dateTime;
   final Duration duration;
   final int overallScore;
@@ -27,7 +28,6 @@ class PracticeSession {
   final int postureScore;
   final int attentionScore;
   final Map<String, int> fillerCounts;
-  final List<int> paceHistory;
   final List<String> coachingTips;
   final bool isPrototypeData;
 }

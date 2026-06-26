@@ -11,7 +11,7 @@ void main() {
     tester.view.physicalSize = const Size(430, 932);
     addTearDown(tester.view.reset);
   }
-
+  
   Future<AppState> openHome(WidgetTester tester) async {
     final state = AppState();
     await tester.pumpWidget(

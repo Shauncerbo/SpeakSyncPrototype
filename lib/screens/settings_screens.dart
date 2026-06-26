@@ -128,6 +128,35 @@ class SettingsScreen extends StatelessWidget {
                   child: Column(
                     children: [
                       DropdownButtonFormField<String>(
+                        initialValue: preferences.defaultLanguage,
+                        decoration: const InputDecoration(
+                          labelText: 'Default language',
+                        ),
+                        items:
+                            const [
+                                  'English',
+                                  'English–Filipino',
+                                  'English–Bisaya',
+                                  'Mixed Language',
+                                ]
+                                .map(
+                                  (value) => DropdownMenuItem(
+                                    value: value,
+                                    child: Text(value),
+                                  ),
+                                )
+                                .toList(),
+                        onChanged: (value) {
+                          if (value != null) {
+                            _update(
+                              context,
+                              preferences.copyWith(defaultLanguage: value),
+                            );
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                      DropdownButtonFormField<String>(
                         initialValue: preferences.defaultDuration,
                         decoration: const InputDecoration(
                           labelText: 'Default duration',
