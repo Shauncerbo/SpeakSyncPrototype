@@ -961,147 +961,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  Card(
-                    color: const Color(0xFF102A46),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Text(
-                                'Recording status',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              Text(
-                                _recording ? 'Recording' : 'Paused',
-                                style: TextStyle(
-                                  color: _recording ? successGreen : warningOrange,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          FilledButton.icon(
-                            onPressed: _toggleRecording,
-                            icon: Icon(
-                              _recording
-                                  ? Icons.stop_circle_outlined
-                                  : Icons.fiber_manual_record_rounded,
-                            ),
-                            label: Text(_recording ? 'Stop recording' : 'Start recording'),
-                            style: FilledButton.styleFrom(
-                              minimumSize: const Size(double.infinity, 46),
-                              backgroundColor:
-                                  _recording ? errorRed : primaryBlue,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Card(
-                    color: const Color(0xFF102A46),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Text History',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          if (_transcriptLines.isEmpty)
-                            const Text(
-                              'No text history yet. Start recording to capture speech lines.',
-                              style: TextStyle(color: Color(0xFF9EB1C7)),
-                            )
-                          else
-                            ..._transcriptLines
-                                .map(
-                                  (line) => Padding(
-                                    padding:
-                                        const EdgeInsets.only(bottom: 10.0),
-                                    child: Text(
-                                      line,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        height: 1.4,
-                                      ),
-                                    ),
-                                  ),
-                                )
-                                .toList(),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Card(
-                    color: const Color(0xFF102A46),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Recommended posture',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            _recommendedPosture,
-                            style: const TextStyle(
-                              color: Color(0xFF9EB1C7),
-                              height: 1.4,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          const Text(
-                            'Repeated gestures',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          if (_gestureCounts.isEmpty)
-                            const Text(
-                              'No repeated gestures detected yet.',
-                              style: TextStyle(color: Color(0xFF9EB1C7)),
-                            )
-                          else
-                            ..._gestureCounts.entries.map(
-                              (entry) => Padding(
-                                padding: const EdgeInsets.only(bottom: 8.0),
-                                child: Text(
-                                  '${entry.key}: ${entry.value} times',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    height: 1.4,
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
+
                   const SizedBox(height: 12),
                   Theme(
                     data: Theme.of(context).copyWith(
@@ -1687,6 +1547,51 @@ class _ReportScreenState extends State<ReportScreen> {
                     ),
                   ),
                 ],
+                const SizedBox(height: 28),
+                const SectionHeader('Recommended posture'),
+                const SizedBox(height: 12),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(
+                      report.recommendedPosture,
+                      style: const TextStyle(
+                        color: Color(0xFF334155),
+                        height: 1.5,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 28),
+                const SectionHeader('Repeated gestures'),
+                const SizedBox(height: 12),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: report.gestureCounts.isEmpty
+                        ? const Text(
+                            'No repeated gestures detected.',
+                            style: TextStyle(color: Color(0xFF617085)),
+                          )
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: report.gestureCounts.entries.map(
+                              (entry) => Padding(
+                                padding: const EdgeInsets.only(bottom: 8.0),
+                                child: Text(
+                                  '${entry.key}: ${entry.value} times',
+                                  style: const TextStyle(
+                                    color: Color(0xFF334155),
+                                    height: 1.4,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                              ),
+                            ).toList(),
+                          ),
+                  ),
+                ),
                 const SizedBox(height: 28),
                 const SectionHeader('Coaching tips'),
                 const SizedBox(height: 12),

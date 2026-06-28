@@ -238,6 +238,51 @@ class SessionDetailsScreen extends StatelessWidget {
                   ),
                 ],
                 const SizedBox(height: 26),
+                const SectionHeader('Recommended posture'),
+                const SizedBox(height: 12),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(
+                      session.recommendedPosture,
+                      style: const TextStyle(
+                        color: Color(0xFF334155),
+                        height: 1.5,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 26),
+                const SectionHeader('Repeated gestures'),
+                const SizedBox(height: 12),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: session.gestureCounts.isEmpty
+                        ? const Text(
+                            'No repeated gestures detected.',
+                            style: TextStyle(color: Color(0xFF617085)),
+                          )
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: session.gestureCounts.entries.map(
+                              (entry) => Padding(
+                                padding: const EdgeInsets.only(bottom: 8.0),
+                                child: Text(
+                                  '${entry.key}: ${entry.value} times',
+                                  style: const TextStyle(
+                                    color: Color(0xFF334155),
+                                    height: 1.4,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                              ),
+                            ).toList(),
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 26),
                 const SectionHeader('Coaching tips'),
                 const SizedBox(height: 12),
                 ...session.coachingTips.map(

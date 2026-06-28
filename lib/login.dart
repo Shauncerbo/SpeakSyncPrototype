@@ -35,9 +35,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
     // Simulate a network request taking 2 seconds (makes the UI look realistic!)
     await Future.delayed(const Duration(seconds: 2));
+    // HARDCODED CREDENTIALS: Change these to whatever you want to use for testing
+    const String scriptedEmail = "student@speaksync.com";
+    const String scriptedPassword = "capstone123";
 
     if (mounted) {
-      if (AuthService.authenticate(email, password)) {
+      if (email == scriptedEmail && password == scriptedPassword) {
         Navigator.of(context).pushReplacementNamed('/home');
       } else {
         _showErrorSnackBar('Invalid credentials. Try student@speaksync.com / capstone123');
