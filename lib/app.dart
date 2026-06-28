@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+
 import 'core/app_theme.dart';
-import 'state/app_state.dart';
-import 'login.dart';
-import 'screens/splash_onboarding.dart';
+import 'register.dart';
 import 'screens/main_shell.dart';
+import 'screens/splash_onboarding.dart';
+import 'state/app_state.dart';
 
 class SpeakSyncApp extends StatelessWidget {
   const SpeakSyncApp({
@@ -36,6 +37,7 @@ class SpeakSyncApp extends StatelessWidget {
 
           routes: {
             '/home': (context) => const MainShell(), 
+            '/register': (context) => const RegisterScreen(),
           },
         ),
       ),

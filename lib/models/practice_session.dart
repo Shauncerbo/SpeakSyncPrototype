@@ -14,6 +14,9 @@ class PracticeSession {
     required this.fillerCounts,
     required this.coachingTips,
     this.textTranscript,
+    this.transcriptLines = const [],
+    this.gestureCounts = const {},
+    this.recommendedPosture = 'Maintain a steady upper-body posture.',
     required this.isPrototypeData,
   });
 
@@ -31,5 +34,8 @@ class PracticeSession {
   final Map<String, int> fillerCounts;
   final List<String> coachingTips;
   final String? textTranscript;
+  final List<String> transcriptLines;
+  final Map<String, int> gestureCounts;
+  final String recommendedPosture;
   final bool isPrototypeData;
 }

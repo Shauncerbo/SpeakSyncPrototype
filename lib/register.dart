@@ -2,50 +2,68 @@ import 'package:flutter/material.dart';
 
 import 'auth_service.dart';
 
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+class RegisterScreen extends StatefulWidget {
+  const RegisterScreen({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  State<RegisterScreen> createState() => _RegisterScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  
+  final _confirmPasswordController = TextEditingController();
+
   bool _isPasswordHidden = true;
   bool _isLoading = false;
 
   @override
   void dispose() {
+    _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
+    _confirmPasswordController.dispose();
     super.dispose();
   }
 
-  // --- TEMPORARY MOCK LOGIN LOGIC ---
-  void _submitLogin() async {
+  void _submitRegistration() async {
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() => _isLoading = true);
-
+    final fullName = _nameController.text.trim();
     final email = _emailController.text.trim();
     final password = _passwordController.text;
+    final confirmPassword = _confirmPasswordController.text;
 
-    // Simulate a network request taking 2 seconds (makes the UI look realistic!)
+    if (password != confirmPassword) {
+      _showErrorSnackBar('Passwords do not match.');
+      return;
+    }
+
+    setState(() => _isLoading = true);
     await Future.delayed(const Duration(seconds: 2));
 
-    if (mounted) {
-      if (AuthService.authenticate(email, password)) {
-        Navigator.of(context).pushReplacementNamed('/home');
-      } else {
-        _showErrorSnackBar('Invalid credentials. Try student@speaksync.com / capstone123');
-      }
-      setState(() => _isLoading = false);
+    final errorMessage = AuthService.registerUser(fullName, email, password);
+    if (!mounted) return;
+
+    setState(() => _isLoading = false);
+
+    if (errorMessage != null) {
+      _showErrorSnackBar(errorMessage);
+      return;
     }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Account registered successfully. Please sign in.'),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+
+    Navigator.of(context).pop();
   }
-  // ----------------------------------
 
   void _showErrorSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -60,6 +78,9 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('Register Account'),
+      ),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24.0),
@@ -70,19 +91,34 @@ class _LoginScreenState extends State<LoginScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Text(
-                  'Welcome to SpeakSync',
+                  'Create your account',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'Sign in to proceed with your rehearsal',
+                  'Use your SHS email to register and start rehearsing.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.grey),
                 ),
                 const SizedBox(height: 32),
 
-                // Email Input
+                TextFormField(
+                  controller: _nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Full Name',
+                    prefixIcon: Icon(Icons.person_outline),
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Please enter your full name.';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+
                 TextFormField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
@@ -95,12 +131,14 @@ class _LoginScreenState extends State<LoginScreen> {
                     if (value == null || value.trim().isEmpty) {
                       return 'Please enter your email address.';
                     }
+                    if (!value.contains('@') || !value.contains('.')) {
+                      return 'Please enter a valid email address.';
+                    }
                     return null;
                   },
                 ),
                 const SizedBox(height: 16),
 
-                // Password Input
                 TextFormField(
                   controller: _passwordController,
                   obscureText: _isPasswordHidden,
@@ -121,14 +159,33 @@ class _LoginScreenState extends State<LoginScreen> {
                     if (value == null || value.isEmpty) {
                       return 'Please enter your password.';
                     }
+                    if (value.length < 6) {
+                      return 'Password must be at least 6 characters.';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+
+                TextFormField(
+                  controller: _confirmPasswordController,
+                  obscureText: _isPasswordHidden,
+                  decoration: const InputDecoration(
+                    labelText: 'Confirm Password',
+                    prefixIcon: Icon(Icons.lock_outline),
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please confirm your password.';
+                    }
                     return null;
                   },
                 ),
                 const SizedBox(height: 24),
 
-                // Login Action Button
                 ElevatedButton(
-                  onPressed: _isLoading ? null : _submitLogin,
+                  onPressed: _isLoading ? null : _submitRegistration,
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -139,14 +196,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           width: 20,
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                         )
-                      : const Text('Sign In', style: TextStyle(fontSize: 16)),
-                ),
-                const SizedBox(height: 12),
-                TextButton(
-                  onPressed: _isLoading ? null : () {
-                    Navigator.of(context).pushNamed('/register');
-                  },
-                  child: const Text('Create account'),
+                      : const Text('Create Account', style: TextStyle(fontSize: 16)),
                 ),
               ],
             ),

@@ -1,6 +1,8 @@
 import 'dart:async';
 
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../app.dart';
 import '../core/app_theme.dart';
@@ -451,13 +453,31 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   Timer? _alertTimer;
   int _elapsedSeconds = 0;
   bool _paused = false;
+  bool _recording = false;
+  bool _cameraReady = false;
+  CameraController? _cameraController;
+  XFile? _recordedVideo;
+  String _cameraStatus = 'Waiting for camera permission...';
   bool _ending = false;
   String _pace = 'Normal';
   String _posture = 'Good';
   int _attention = 82;
   final Map<String, int> _fillers = {};
+  final Map<String, int> _gestureCounts = {};
+  final List<String> _transcriptLines = [];
+  String _recommendedPosture =
+      'Maintain a steady upper-body posture and keep your eyes near the camera.';
   String? _alert;
   Color _alertColor = primaryBlue;
+
+  final List<String> _transcriptSamples = const [
+    'Today I will talk about why practice matters in every presentation.',
+    'Using short pauses helps you stay clear and avoid filler words.',
+    'Make sure your shoulders are relaxed and your voice stays steady.',
+    'Keep your eyes toward the camera to build connection with the audience.',
+    'Repeat important phrases slowly and with confidence.',
+    'End with a strong closing statement that ties your ideas together.',
+  ];
 
   int get _fillerTotal =>
       _fillers.values.fold<int>(0, (total, value) => total + value);
@@ -467,9 +487,13 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     super.initState();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && !_paused) {
-        setState(() => _elapsedSeconds++);
+        setState(() {
+          _elapsedSeconds++;
+          if (_recording) _maybeAddTranscriptLine();
+        });
       }
     });
+    _prepareCamera();
   }
 
   void _showAlert(String message, Color color) {
@@ -508,8 +532,114 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       _pace = 'Normal';
       _posture = 'Good';
       _attention = 90;
+      _updateRecommendedPosture();
     });
     _showAlert('Good delivery', successGreen);
+  }
+
+  Future<void> _prepareCamera() async {
+    final cameraStatus = await Permission.camera.request();
+    final microphoneStatus = await Permission.microphone.request();
+    if (!mounted) return;
+
+    if (!cameraStatus.isGranted || !microphoneStatus.isGranted) {
+      setState(() {
+        _cameraReady = false;
+        _cameraStatus =
+            'Camera and microphone access are required to record rehearsal video.';
+      });
+      return;
+    }
+
+    try {
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        setState(() {
+          _cameraReady = false;
+          _cameraStatus = 'No camera found on this device.';
+        });
+        return;
+      }
+
+      final selectedCamera = cameras.firstWhere(
+        (camera) => camera.lensDirection == CameraLensDirection.front,
+        orElse: () => cameras.first,
+      );
+
+      _cameraController = CameraController(
+        selectedCamera,
+        ResolutionPreset.medium,
+        enableAudio: true,
+      );
+      await _cameraController!.initialize();
+
+      if (!mounted) return;
+      setState(() {
+        _cameraReady = true;
+        _cameraStatus = 'Camera ready';
+      });
+    } catch (_) {
+      setState(() {
+        _cameraReady = false;
+        _cameraStatus = 'Unable to initialize camera.';
+      });
+    }
+  }
+
+  Future<void> _toggleRecording() async {
+    if (!_cameraReady || _cameraController == null) {
+      await _prepareCamera();
+    }
+
+    if (!_cameraReady || _cameraController == null) {
+      _showAlert(
+        'Please allow camera and microphone access before recording.',
+        errorRed,
+      );
+      return;
+    }
+
+    if (!_recording) {
+      try {
+        await _cameraController!.startVideoRecording();
+        _showAlert('Recording started', successGreen);
+      } catch (_) {
+        _showAlert('Failed to start recording.', errorRed);
+        return;
+      }
+    } else {
+      try {
+        _recordedVideo = await _cameraController!.stopVideoRecording();
+        _showAlert('Recording saved locally.', successGreen);
+      } catch (_) {
+        _showAlert('Failed to stop recording.', errorRed);
+      }
+    }
+
+    setState(() => _recording = !_recording);
+  }
+
+  void _recordGesture(String gesture) {
+    setState(() {
+      _gestureCounts[gesture] = (_gestureCounts[gesture] ?? 0) + 1;
+      _updateRecommendedPosture();
+    });
+    _showAlert('$gesture detected', warningOrange);
+  }
+
+  void _updateRecommendedPosture() {
+    setState(() {
+      _recommendedPosture = _posture == 'Good'
+          ? 'Maintain your steady upper-body posture and stay centered in the frame.'
+          : 'Keep your shoulders back and return your gaze to the camera.';
+    });
+  }
+
+  void _maybeAddTranscriptLine() {
+    if (_transcriptLines.length >= _transcriptSamples.length) return;
+    if (_elapsedSeconds == 0 || _elapsedSeconds % 5 != 0) return;
+    final nextLine = _transcriptSamples[_transcriptLines.length];
+    _transcriptLines.add(nextLine);
   }
 
   Future<void> _confirmEnd() async {
@@ -534,6 +664,13 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       ),
     );
     if (shouldEnd != true || !mounted) return;
+    if (_recording && _cameraController != null) {
+      try {
+        await _cameraController!.stopVideoRecording();
+      } catch (_) {
+        // Ignore stop errors during cleanup.
+      }
+    }
     _ending = true;
     _timer?.cancel();
     final state = AppStateScope.of(context, listen: false);
@@ -554,6 +691,9 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       fillerCounts: Map.unmodifiable(_fillers),
       coachingTips: _buildTips(),
       textTranscript: "This is a mock transcript generated by your simulated practice session. In the full version, the Groq Whisper AI will transcribe your voice into text here so you can review exactly what you said, spot where you used filler words, and analyze your speech structure.",
+      transcriptLines: List.unmodifiable(_transcriptLines),
+      gestureCounts: Map.unmodifiable(_gestureCounts),
+      recommendedPosture: _recommendedPosture,
       isPrototypeData: true,
     );
     state.setCurrentReport(session);
@@ -596,6 +736,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   void dispose() {
     _timer?.cancel();
     _alertTimer?.cancel();
+    _cameraController?.dispose();
     super.dispose();
   }
 
@@ -668,36 +809,42 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                       child: Stack(
                         children: [
                           Positioned.fill(
-                            child: CustomPaint(painter: _CameraGridPainter()),
-                          ),
-                          const Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.videocam_outlined,
-                                  color: Color(0xFF9EB1C7),
-                                  size: 52,
-                                ),
-                                SizedBox(height: 12),
-                                Text(
-                                  'Camera Preview Simulation',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w700,
+                            child: _cameraReady && _cameraController != null &&
+                                    _cameraController!.value.isInitialized
+                                ? CameraPreview(_cameraController!)
+                                : Container(
+                                    color: const Color(0xFF102A46),
+                                    child: Center(
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(
+                                            Icons.videocam_outlined,
+                                            color: Color(0xFF9EB1C7),
+                                            size: 52,
+                                          ),
+                                          const SizedBox(height: 12),
+                                          const Text(
+                                            'Camera preview will appear here',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 5),
+                                          Text(
+                                            _cameraStatus,
+                                            textAlign: TextAlign.center,
+                                            style: const TextStyle(
+                                              color: Color(0xFF9EB1C7),
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                                   ),
-                                ),
-                                SizedBox(height: 5),
-                                Text(
-                                  'No real camera is active',
-                                  style: TextStyle(
-                                    color: Color(0xFF9EB1C7),
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ],
-                            ),
                           ),
                           Positioned(
                             left: 14,
@@ -813,6 +960,147 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                         good: _fillerTotal == 0,
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 12),
+                  Card(
+                    color: const Color(0xFF102A46),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'Recording status',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              Text(
+                                _recording ? 'Recording' : 'Paused',
+                                style: TextStyle(
+                                  color: _recording ? successGreen : warningOrange,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          FilledButton.icon(
+                            onPressed: _toggleRecording,
+                            icon: Icon(
+                              _recording
+                                  ? Icons.stop_circle_outlined
+                                  : Icons.fiber_manual_record_rounded,
+                            ),
+                            label: Text(_recording ? 'Stop recording' : 'Start recording'),
+                            style: FilledButton.styleFrom(
+                              minimumSize: const Size(double.infinity, 46),
+                              backgroundColor:
+                                  _recording ? errorRed : primaryBlue,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Card(
+                    color: const Color(0xFF102A46),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Text History',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          if (_transcriptLines.isEmpty)
+                            const Text(
+                              'No text history yet. Start recording to capture speech lines.',
+                              style: TextStyle(color: Color(0xFF9EB1C7)),
+                            )
+                          else
+                            ..._transcriptLines
+                                .map(
+                                  (line) => Padding(
+                                    padding:
+                                        const EdgeInsets.only(bottom: 10.0),
+                                    child: Text(
+                                      line,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        height: 1.4,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Card(
+                    color: const Color(0xFF102A46),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Recommended posture',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            _recommendedPosture,
+                            style: const TextStyle(
+                              color: Color(0xFF9EB1C7),
+                              height: 1.4,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Repeated gestures',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          if (_gestureCounts.isEmpty)
+                            const Text(
+                              'No repeated gestures detected yet.',
+                              style: TextStyle(color: Color(0xFF9EB1C7)),
+                            )
+                          else
+                            ..._gestureCounts.entries.map(
+                              (entry) => Padding(
+                                padding: const EdgeInsets.only(bottom: 8.0),
+                                child: Text(
+                                  '${entry.key}: ${entry.value} times',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Theme(
