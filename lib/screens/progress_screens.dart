@@ -219,6 +219,24 @@ class SessionDetailsScreen extends StatelessWidget {
                           ),
                   ),
                 ),
+                if (session.textTranscript != null) ...[
+                  const SizedBox(height: 26),
+                  const SectionHeader('Text transcript'),
+                  const SizedBox(height: 12),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        session.textTranscript!,
+                        style: const TextStyle(
+                          color: Color(0xFF334155),
+                          height: 1.5,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 26),
                 const SectionHeader('Coaching tips'),
                 const SizedBox(height: 12),

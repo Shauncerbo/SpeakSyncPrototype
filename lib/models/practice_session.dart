@@ -13,6 +13,7 @@ class PracticeSession {
     required this.attentionScore,
     required this.fillerCounts,
     required this.coachingTips,
+    this.textTranscript,
     required this.isPrototypeData,
   });
 
@@ -29,5 +30,6 @@ class PracticeSession {
   final int attentionScore;
   final Map<String, int> fillerCounts;
   final List<String> coachingTips;
+  final String? textTranscript;
   final bool isPrototypeData;
 }

@@ -28,6 +28,7 @@ List<PracticeSession> initialSessions() => [
       'Pause briefly instead of using a filler word.',
       'Keep your eyes near the camera during key points.',
     ],
+    textTranscript: "Good morning everyone. Today I'm here to talk about climate change. Kuan, it is very important that we address this issue. The global temperatures are rising, and ano, we must act before it is too late.",
     isPrototypeData: true,
   ),
   PracticeSession(
@@ -47,6 +48,7 @@ List<PracticeSession> initialSessions() => [
       'Slow down around important ideas.',
       'Use a steady stance to support your delivery.',
     ],
+    textTranscript: "Technology has completely revolutionized education. In the past, um, we relied heavily on textbooks. Now, kuan, students have access to the entire world's knowledge at their fingertips.",
     isPrototypeData: true,
   ),
   PracticeSession(
@@ -66,6 +68,7 @@ List<PracticeSession> initialSessions() => [
       'Take one planning breath before answering.',
       'Replace fillers with a quiet pause.',
     ],
+    textTranscript: "I wasn't expecting this question, but kuan, I think my favorite book is The Alchemist. It teaches us about destiny. Ano, following your personal legend is the main theme, and kuan, it really resonated with me.",
     isPrototypeData: true,
   ),
   PracticeSession(
@@ -85,6 +88,7 @@ List<PracticeSession> initialSessions() => [
       'Square your shoulders and keep your upper body relaxed.',
       'Look toward the camera at the end of each thought.',
     ],
+    textTranscript: "Environmental awareness starts at home. Kuan, turning off the lights when leaving a room is simple. Kuan, recycling plastics is also crucial. We need everyone to participate, kuan, to really make a lasting impact.",
     isPrototypeData: true,
   ),
 ];
