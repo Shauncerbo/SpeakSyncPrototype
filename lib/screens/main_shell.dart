@@ -19,29 +19,34 @@ class _MainShellState extends State<MainShell> {
   @override
   void initState() {
     super.initState();
-    _index = widget.initialIndex == 1 ? 0 : widget.initialIndex;
+    _index = 0; // Default to Home
   }
 
   void _select(int value) {
-    if (value == 1) {
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(builder: (_) => const PracticeSetupScreen()),
-      );
-      return;
-    }
     setState(() => _index = value);
   }
 
   @override
   Widget build(BuildContext context) {
     final pages = <Widget>[
-      HomeScreen(onViewProgress: () => setState(() => _index = 2)),
-      const SizedBox.shrink(),
+      HomeScreen(onViewProgress: () => setState(() => _index = 1)),
       const ProgressScreen(),
       const SettingsScreen(),
     ];
+    
     return Scaffold(
       body: IndexedStack(index: _index, children: pages),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const PracticeSetupScreen()),
+          );
+        },
+        backgroundColor: const Color(0xFF67E8F9),
+        foregroundColor: const Color(0xFF0F172A),
+        tooltip: 'Practice',
+        child: const Icon(Icons.mic_rounded),
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: _select,
@@ -50,11 +55,6 @@ class _MainShellState extends State<MainShell> {
             icon: Icon(Icons.home_outlined),
             selectedIcon: Icon(Icons.home_rounded),
             label: 'Home',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.mic_none_rounded),
-            selectedIcon: Icon(Icons.mic_rounded),
-            label: 'Practice',
           ),
           NavigationDestination(
             icon: Icon(Icons.insights_outlined),

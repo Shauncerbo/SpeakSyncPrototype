@@ -258,14 +258,6 @@ class SettingsScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 24),
-              const InfoBanner(
-                icon: Icons.shield_outlined,
-                title: 'Privacy by design',
-                message:
-                    'The planned final system will process visual body-language information on the device. This prototype does not record or upload real audio or video.',
-                color: accentTeal,
-              ),
-              const SizedBox(height: 18),
               Card(
                 child: Column(
                   children: [

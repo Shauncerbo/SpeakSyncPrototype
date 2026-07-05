@@ -242,30 +242,36 @@ class StatusCard extends StatelessWidget {
           child: Icon(icon),
         ),
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (isChecking)
-              const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            else
-              const Icon(
-                Icons.check_circle_rounded,
-                color: successGreen,
-                size: 20,
+        trailing: SizedBox(
+          width: 110,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.start,
+            children: [
+              if (isChecking)
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                const Icon(
+                  Icons.check_circle_rounded,
+                  color: successGreen,
+                  size: 20,
+                ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  status,
+                  style: const TextStyle(
+                    color: successGreen,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-            const SizedBox(width: 7),
-            Text(
-              status,
-              style: const TextStyle(
-                color: successGreen,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

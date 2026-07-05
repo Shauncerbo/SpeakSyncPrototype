@@ -267,6 +267,15 @@ class DeviceCheckScreen extends StatefulWidget {
 class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
   bool _checking = false;
 
+  @override
+  void initState() {
+    super.initState();
+    // Start the checking animation automatically when the screen loads
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _recheck();
+    });
+  }
+
   Future<void> _recheck() async {
     if (_checking) return;
     setState(() => _checking = true);
@@ -716,20 +725,19 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   List<String> _buildTips() {
     final tips = <String>[];
     if (_fillerTotal > 0) {
-      tips.add('Use a short, quiet pause when you need time to think.');
+      tips.add('Try taking a quick breath instead of using a filler word. Silence feels much shorter to the audience than it does to you.');
     }
     if (_posture != 'Good') {
-      tips.add('Relax your shoulders and keep your upper body centered.');
+      tips.add('Your posture shifted noticeably during the recording. Plant your feet shoulder-width apart to project more authority and stabilize your frame.');
     }
     if (_attention < 75) {
-      tips.add('Look toward the camera at the end of important ideas.');
+      tips.add('You broke eye contact with the camera frequently. Try visualizing a single friendly face right behind the lens to maintain a stronger connection.');
     }
     if (_pace != 'Normal') {
-      tips.add('Slow down slightly and let each key point land.');
+      tips.add('Your pacing felt rushed in sections. Practice "chunking" your sentences into smaller phrases and fully stopping at the periods.');
     }
     if (tips.isEmpty) {
-      tips.add('Keep your steady pace and confident camera focus.');
-      tips.add('Add purposeful pauses to make strong ideas stand out.');
+      tips.add('Excellent pacing and strong eye contact! Your delivery felt highly polished. For an even greater impact next time, try using hand gestures to emphasize your most important points.');
     }
     return tips;
   }
@@ -1041,18 +1049,45 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                     children: [
                       Expanded(
                         child: OutlinedButton.icon(
-                          key: const Key('pause_resume'),
+                          key: const Key('restart_session'),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: Colors.white,
                             side: const BorderSide(color: Color(0xFF57718C)),
                           ),
-                          onPressed: () => setState(() => _paused = !_paused),
-                          icon: Icon(
-                            _paused
-                                ? Icons.play_arrow_rounded
-                                : Icons.pause_rounded,
-                          ),
-                          label: Text(_paused ? 'Resume' : 'Pause'),
+                          onPressed: () async {
+                            final confirm = await showDialog<bool>(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: const Text('Restart Session'),
+                                content: const Text('Are you sure you want to restart? Your current progress will be lost.'),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.of(context).pop(false),
+                                    child: const Text('Cancel'),
+                                  ),
+                                  TextButton(
+                                    onPressed: () => Navigator.of(context).pop(true),
+                                    child: const Text('Restart'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (confirm == true && mounted) {
+                              setState(() {
+                                _elapsedSeconds = 0;
+                                _fillers.clear();
+                                _gestureCounts.clear();
+                                _transcriptLines.clear();
+                                _pace = 'Normal';
+                                _posture = 'Good';
+                                _attention = 82;
+                                _paused = false;
+                                _alert = null;
+                              });
+                            }
+                          },
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('Restart'),
                         ),
                       ),
                       const SizedBox(width: 12),

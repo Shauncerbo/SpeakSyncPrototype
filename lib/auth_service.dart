@@ -9,11 +9,14 @@ class AuthService {
     return storedPassword != null && storedPassword == password;
   }
 
-  static String? registerUser(String fullName, String email, String password) {
+  static String? registerUser(String firstName, String? middleName, String lastName, String email, String password) {
     final normalizedEmail = email.trim().toLowerCase();
 
-    if (fullName.trim().isEmpty) {
-      return 'Please enter your full name.';
+    if (firstName.trim().isEmpty) {
+      return 'Please enter your first name.';
+    }
+    if (lastName.trim().isEmpty) {
+      return 'Please enter your last name.';
     }
     if (normalizedEmail.isEmpty) {
       return 'Please enter your email address.';
