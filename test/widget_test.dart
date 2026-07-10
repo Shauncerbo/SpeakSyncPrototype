@@ -11,7 +11,7 @@ void main() {
     tester.view.physicalSize = const Size(430, 932);
     addTearDown(tester.view.reset);
   }
-  
+
   Future<AppState> openHome(WidgetTester tester) async {
     final state = AppState();
     await tester.pumpWidget(
@@ -120,35 +120,23 @@ void main() {
     await enterValidSetup(tester);
     await openRehearsal(tester);
 
-    expect(find.text('Camera Preview Simulation'), findsOneWidget);
+    expect(find.byKey(const Key('toggle_microphone')), findsOneWidget);
+    expect(find.byKey(const Key('toggle_camera')), findsOneWidget);
     expect(find.text('Fillers Detected'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
   });
 
-  testWidgets('7. Simulate Kuan increases filler count', (tester) async {
+  testWidgets('7. Prototype demo controls are removed', (tester) async {
     await setPhoneSize(tester);
     await openHome(tester);
     await openSetup(tester);
     await enterValidSetup(tester);
     await openRehearsal(tester);
 
-    await tester.ensureVisible(find.byKey(const Key('demo_controls')));
-    await tester.tap(find.byKey(const Key('demo_controls')));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(const Key('simulate_kuan')));
-    await tester.tap(find.byKey(const Key('simulate_kuan')));
-    await tester.pump();
-
-    expect(find.text('Kuan detected'), findsOneWidget);
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('filler_metric')),
-        matching: find.text('1'),
-      ),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('demo_controls')), findsNothing);
+    expect(find.text('Prototype Demo Controls'), findsNothing);
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump();

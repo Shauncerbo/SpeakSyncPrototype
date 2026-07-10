@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../app.dart';
@@ -464,6 +466,8 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   bool _paused = false;
   bool _recording = false;
   bool _cameraReady = false;
+  bool _microphoneEnabled = true;
+  bool _cameraEnabled = true;
   CameraController? _cameraController;
   XFile? _recordedVideo;
   String _cameraStatus = 'Waiting for camera permission...';
@@ -474,7 +478,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   final Map<String, int> _fillers = {};
   final Map<String, int> _gestureCounts = {};
   final List<String> _transcriptLines = [];
-  String _recommendedPosture =
+  final String _recommendedPosture =
       'Maintain a steady upper-body posture and keep your eyes near the camera.';
   String? _alert;
   Color _alertColor = primaryBlue;
@@ -516,36 +520,6 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     });
   }
 
-  void _addFiller(String filler) {
-    setState(() => _fillers[filler] = (_fillers[filler] ?? 0) + 1);
-    _showAlert('$filler detected', warningOrange);
-  }
-
-  void _simulatePoorPosture() {
-    setState(() => _posture = 'Needs Correction');
-    _showAlert('Adjust your posture', errorRed);
-  }
-
-  void _simulateLookingAway() {
-    setState(() => _attention = (_attention - 18).clamp(35, 100));
-    _showAlert('Look toward the camera', warningOrange);
-  }
-
-  void _simulateFastPace() {
-    setState(() => _pace = 'Too Fast');
-    _showAlert('Slow down slightly', warningOrange);
-  }
-
-  void _simulateGoodPerformance() {
-    setState(() {
-      _pace = 'Normal';
-      _posture = 'Good';
-      _attention = 90;
-      _updateRecommendedPosture();
-    });
-    _showAlert('Good delivery', successGreen);
-  }
-
   Future<void> _prepareCamera() async {
     final cameraStatus = await Permission.camera.request();
     if (!mounted) return;
@@ -553,8 +527,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     if (!cameraStatus.isGranted) {
       setState(() {
         _cameraReady = false;
-        _cameraStatus =
-            'Camera access is required to record rehearsal video.';
+        _cameraStatus = 'Camera access is required to record rehearsal video.';
       });
       return;
     }
@@ -576,10 +549,20 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
 
       _cameraController = CameraController(
         selectedCamera,
-        ResolutionPreset.medium,
+        ResolutionPreset.max,
         enableAudio: true,
       );
       await _cameraController!.initialize();
+
+      // Use the widest view supported by the device so the speaker can keep
+      // their head, hands, and waist visible during rehearsal.
+      try {
+        final minimumZoom = await _cameraController!.getMinZoomLevel();
+        await _cameraController!.setZoomLevel(minimumZoom);
+      } catch (_) {
+        // Zoom is optional. Browsers and some laptop cameras do not expose
+        // zoom controls, so keep using their default (widest) camera feed.
+      }
 
       if (!mounted) return;
       setState(() {
@@ -628,20 +611,29 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     setState(() => _recording = !_recording);
   }
 
-  void _recordGesture(String gesture) {
-    setState(() {
-      _gestureCounts[gesture] = (_gestureCounts[gesture] ?? 0) + 1;
-      _updateRecommendedPosture();
-    });
-    _showAlert('$gesture detected', warningOrange);
+  void _toggleMicrophone() {
+    setState(() => _microphoneEnabled = !_microphoneEnabled);
   }
 
-  void _updateRecommendedPosture() {
-    setState(() {
-      _recommendedPosture = _posture == 'Good'
-          ? 'Maintain your steady upper-body posture and stay centered in the frame.'
-          : 'Keep your shoulders back and return your gaze to the camera.';
-    });
+  Future<void> _toggleCamera() async {
+    final controller = _cameraController;
+    if (!_cameraReady ||
+        controller == null ||
+        !controller.value.isInitialized) {
+      _showAlert('Camera is not ready yet.', warningOrange);
+      return;
+    }
+
+    try {
+      if (_cameraEnabled) {
+        await controller.pausePreview();
+      } else {
+        await controller.resumePreview();
+      }
+      if (mounted) setState(() => _cameraEnabled = !_cameraEnabled);
+    } on CameraException {
+      _showAlert('Unable to change the camera state.', errorRed);
+    }
   }
 
   void _maybeAddTranscriptLine() {
@@ -699,7 +691,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       attentionScore: _attention,
       fillerCounts: Map.unmodifiable(_fillers),
       coachingTips: _buildTips(),
-      textTranscript: _transcriptLines.isNotEmpty 
+      textTranscript: _transcriptLines.isNotEmpty
           ? _transcriptLines.join(' ')
           : _transcriptSamples.join(' '),
       transcriptLines: List.unmodifiable(_transcriptLines),
@@ -725,19 +717,29 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   List<String> _buildTips() {
     final tips = <String>[];
     if (_fillerTotal > 0) {
-      tips.add('Try taking a quick breath instead of using a filler word. Silence feels much shorter to the audience than it does to you.');
+      tips.add(
+        'Try taking a quick breath instead of using a filler word. Silence feels much shorter to the audience than it does to you.',
+      );
     }
     if (_posture != 'Good') {
-      tips.add('Your posture shifted noticeably during the recording. Plant your feet shoulder-width apart to project more authority and stabilize your frame.');
+      tips.add(
+        'Your posture shifted noticeably during the recording. Plant your feet shoulder-width apart to project more authority and stabilize your frame.',
+      );
     }
     if (_attention < 75) {
-      tips.add('You broke eye contact with the camera frequently. Try visualizing a single friendly face right behind the lens to maintain a stronger connection.');
+      tips.add(
+        'You broke eye contact with the camera frequently. Try visualizing a single friendly face right behind the lens to maintain a stronger connection.',
+      );
     }
     if (_pace != 'Normal') {
-      tips.add('Your pacing felt rushed in sections. Practice "chunking" your sentences into smaller phrases and fully stopping at the periods.');
+      tips.add(
+        'Your pacing felt rushed in sections. Practice "chunking" your sentences into smaller phrases and fully stopping at the periods.',
+      );
     }
     if (tips.isEmpty) {
-      tips.add('Excellent pacing and strong eye contact! Your delivery felt highly polished. For an even greater impact next time, try using hand gestures to emphasize your most important points.');
+      tips.add(
+        'Excellent pacing and strong eye contact! Your delivery felt highly polished. For an even greater impact next time, try using hand gestures to emphasize your most important points.',
+      );
     }
     return tips;
   }
@@ -807,96 +809,31 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
               maxWidth: 760,
               child: Column(
                 children: [
-                  AspectRatio(
-                    aspectRatio: 4 / 3,
-                    child: Container(
-                      clipBehavior: Clip.antiAlias,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF102A46),
-                        borderRadius: BorderRadius.circular(22),
-                        border: Border.all(color: const Color(0xFF294966)),
+                  Stack(
+                    clipBehavior: Clip.none,
+                    alignment: Alignment.bottomCenter,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 28),
+                        child: _CameraStage(
+                          controller: _cameraController,
+                          cameraReady: _cameraReady,
+                          cameraEnabled: _cameraEnabled,
+                          cameraStatus: _cameraStatus,
+                        ),
                       ),
-                      child: Stack(
-                        children: [
-                          Positioned.fill(
-                            child: _cameraReady && _cameraController != null &&
-                                    _cameraController!.value.isInitialized
-                                ? CameraPreview(_cameraController!)
-                                : Container(
-                                    color: const Color(0xFF102A46),
-                                    child: Center(
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(
-                                            Icons.videocam_outlined,
-                                            color: Color(0xFF9EB1C7),
-                                            size: 52,
-                                          ),
-                                          const SizedBox(height: 12),
-                                          const Text(
-                                            'Camera preview will appear here',
-                                            textAlign: TextAlign.center,
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 5),
-                                          Text(
-                                            _cameraStatus,
-                                            textAlign: TextAlign.center,
-                                            style: const TextStyle(
-                                              color: Color(0xFF9EB1C7),
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                          ),
-                          Positioned(
-                            left: 14,
-                            top: 14,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xCCB42318),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: const Row(
-                                children: [
-                                  Icon(
-                                    Icons.circle,
-                                    color: Colors.white,
-                                    size: 9,
-                                  ),
-                                  SizedBox(width: 6),
-                                  Text(
-                                    'REC',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            right: 14,
-                            bottom: 14,
-                            child: _MicActivity(paused: _paused),
-                          ),
-                        ],
+                      Positioned(
+                        bottom: 0,
+                        child: _MediaControls(
+                          microphoneEnabled: _microphoneEnabled,
+                          cameraEnabled: _cameraEnabled,
+                          onMicrophonePressed: _toggleMicrophone,
+                          onCameraPressed: _toggleCamera,
+                        ),
                       ),
-                    ),
+                    ],
                   ),
+                  const SizedBox(height: 10),
                   AnimatedSwitcher(
                     duration: const Duration(milliseconds: 220),
                     child: _alert == null || !setup.enableLiveFeedback
@@ -972,78 +909,6 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                     ],
                   ),
 
-                  const SizedBox(height: 12),
-                  Theme(
-                    data: Theme.of(context).copyWith(
-                      dividerColor: Colors.transparent,
-                      colorScheme: Theme.of(
-                        context,
-                      ).colorScheme.copyWith(onSurface: Colors.white),
-                    ),
-                    child: Card(
-                      color: const Color(0xFF102A46),
-                      child: ExpansionTile(
-                        key: const Key('demo_controls'),
-                        iconColor: Colors.white,
-                        collapsedIconColor: Colors.white,
-                        title: const Text(
-                          'Prototype Demo Controls',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        subtitle: const Text(
-                          'Trigger simulated AI feedback',
-                          style: TextStyle(color: Color(0xFF9EB1C7)),
-                        ),
-                        childrenPadding: const EdgeInsets.fromLTRB(
-                          14,
-                          0,
-                          14,
-                          14,
-                        ),
-                        children: [
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              _DemoButton(
-                                key: const Key('simulate_kuan'),
-                                label: 'Simulate Kuan',
-                                onPressed: () => _addFiller('Kuan'),
-                              ),
-                              _DemoButton(
-                                key: const Key('simulate_ano'),
-                                label: 'Simulate Ano',
-                                onPressed: () => _addFiller('Ano'),
-                              ),
-                              _DemoButton(
-                                key: const Key('simulate_poor_posture'),
-                                label: 'Simulate Poor Posture',
-                                onPressed: _simulatePoorPosture,
-                              ),
-                              _DemoButton(
-                                key: const Key('simulate_looking_away'),
-                                label: 'Simulate Looking Away',
-                                onPressed: _simulateLookingAway,
-                              ),
-                              _DemoButton(
-                                key: const Key('simulate_fast_pace'),
-                                label: 'Simulate Fast Pace',
-                                onPressed: _simulateFastPace,
-                              ),
-                              _DemoButton(
-                                key: const Key('simulate_good'),
-                                label: 'Simulate Good Performance',
-                                onPressed: _simulateGoodPerformance,
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
                   const SizedBox(height: 16),
                   Row(
                     children: [
@@ -1059,14 +924,18 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                               context: context,
                               builder: (context) => AlertDialog(
                                 title: const Text('Restart Session'),
-                                content: const Text('Are you sure you want to restart? Your current progress will be lost.'),
+                                content: const Text(
+                                  'Are you sure you want to restart? Your current progress will be lost.',
+                                ),
                                 actions: [
                                   TextButton(
-                                    onPressed: () => Navigator.of(context).pop(false),
+                                    onPressed: () =>
+                                        Navigator.of(context).pop(false),
                                     child: const Text('Cancel'),
                                   ),
                                   TextButton(
-                                    onPressed: () => Navigator.of(context).pop(true),
+                                    onPressed: () =>
+                                        Navigator.of(context).pop(true),
                                     child: const Text('Restart'),
                                   ),
                                 ],
@@ -1114,71 +983,303 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   }
 }
 
-class _CameraGridPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = const Color(0xFF294966).withValues(alpha: .55)
-      ..strokeWidth = 1;
-    canvas.drawLine(
-      Offset(size.width / 3, 0),
-      Offset(size.width / 3, size.height),
-      paint,
-    );
-    canvas.drawLine(
-      Offset(size.width * 2 / 3, 0),
-      Offset(size.width * 2 / 3, size.height),
-      paint,
-    );
-    canvas.drawLine(
-      Offset(0, size.height / 3),
-      Offset(size.width, size.height / 3),
-      paint,
-    );
-    canvas.drawLine(
-      Offset(0, size.height * 2 / 3),
-      Offset(size.width, size.height * 2 / 3),
-      paint,
-    );
-  }
+class _CameraStage extends StatelessWidget {
+  const _CameraStage({
+    required this.controller,
+    required this.cameraReady,
+    required this.cameraEnabled,
+    required this.cameraStatus,
+  });
 
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-class _MicActivity extends StatelessWidget {
-  const _MicActivity({required this.paused});
-  final bool paused;
+  final CameraController? controller;
+  final bool cameraReady;
+  final bool cameraEnabled;
+  final String cameraStatus;
 
   @override
   Widget build(BuildContext context) {
-    return Semantics(
-      label: paused ? 'Microphone activity paused' : 'Microphone activity',
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          color: const Color(0xCC071526),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.mic_rounded, color: Colors.white, size: 18),
-            const SizedBox(width: 6),
-            ...List.generate(
-              4,
-              (index) => Container(
-                width: 3,
-                height: paused ? 4 : 5.0 + index * 3,
-                margin: const EdgeInsets.symmetric(horizontal: 1),
-                decoration: BoxDecoration(
-                  color: paused
-                      ? const Color(0xFF57718C)
-                      : const Color(0xFF67E8F9),
-                  borderRadius: BorderRadius.circular(3),
+    final activeController = controller;
+    if (cameraReady &&
+        activeController != null &&
+        activeController.value.isInitialized) {
+      return ValueListenableBuilder<CameraValue>(
+        valueListenable: activeController,
+        builder: (context, value, child) {
+          if (!cameraEnabled) {
+            return _buildFrame(
+              aspectRatio: 9 / 16,
+              preview: const _CameraOffView(),
+              showRecordingBadge: false,
+            );
+          }
+
+          final previewAspectRatio = _previewAspectRatio(value);
+          final cameraFeed = kIsWeb
+              ? activeController.buildPreview()
+              : CameraPreview(activeController);
+          final portraitPreview = FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
+              width: previewAspectRatio * 1000,
+              height: 1000,
+              child: cameraFeed,
+            ),
+          );
+          return _buildFrame(aspectRatio: 9 / 16, preview: portraitPreview);
+        },
+      );
+    }
+
+    return _buildFrame(
+      aspectRatio: 9 / 16,
+      showRecordingBadge: false,
+      preview: ColoredBox(
+        color: const Color(0xFF102A46),
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.videocam_outlined,
+                  color: Color(0xFF9EB1C7),
+                  size: 52,
                 ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Camera preview will appear here',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  cameraStatus,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFF9EB1C7),
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  double _previewAspectRatio(CameraValue value) {
+    // Browser webcams already report the orientation in their raw aspect
+    // ratio. Inverting that feed to match the narrow browser window crops it
+    // heavily and looks like digital zoom.
+    if (kIsWeb) {
+      return value.aspectRatio.isFinite && value.aspectRatio > 0
+          ? value.aspectRatio
+          : 4 / 3;
+    }
+
+    final orientation = value.isRecordingVideo
+        ? value.recordingOrientation ?? value.deviceOrientation
+        : value.previewPauseOrientation ??
+              value.lockedCaptureOrientation ??
+              value.deviceOrientation;
+    final isLandscape =
+        orientation == DeviceOrientation.landscapeLeft ||
+        orientation == DeviceOrientation.landscapeRight;
+    final ratio = isLandscape ? value.aspectRatio : 1 / value.aspectRatio;
+    return ratio.isFinite && ratio > 0 ? ratio : 3 / 4;
+  }
+
+  Widget _buildFrame({
+    required double aspectRatio,
+    required Widget preview,
+    bool showRecordingBadge = true,
+  }) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 430),
+        child: AspectRatio(
+          aspectRatio: aspectRatio,
+          child: Semantics(
+            label: 'Live rehearsal camera. Keep your face and waist visible.',
+            child: Container(
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                color: const Color(0xFF071526),
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: const Color(0xFF294966)),
+              ),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  ColoredBox(
+                    color: const Color(0xFF071526),
+                    child: SizedBox.expand(child: preview),
+                  ),
+                  if (showRecordingBadge)
+                    Positioned(
+                      left: 14,
+                      top: 14,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xCCB42318),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.circle, color: Colors.white, size: 9),
+                            SizedBox(width: 6),
+                            Text(
+                              'REC',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CameraOffView extends StatelessWidget {
+  const _CameraOffView();
+
+  @override
+  Widget build(BuildContext context) {
+    return const ColoredBox(
+      color: Color(0xFF071526),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.videocam_off_rounded,
+              color: Color(0xFF9EB1C7),
+              size: 48,
+            ),
+            SizedBox(height: 10),
+            Text(
+              'Camera off',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MediaControls extends StatelessWidget {
+  const _MediaControls({
+    required this.microphoneEnabled,
+    required this.cameraEnabled,
+    required this.onMicrophonePressed,
+    required this.onCameraPressed,
+  });
+
+  final bool microphoneEnabled;
+  final bool cameraEnabled;
+  final VoidCallback onMicrophonePressed;
+  final VoidCallback onCameraPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFF102A46),
+      elevation: 10,
+      shadowColor: Colors.black54,
+      borderRadius: BorderRadius.circular(30),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 6),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(color: const Color(0xFF57718C)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _MediaControlButton(
+              key: const Key('toggle_microphone'),
+              enabled: microphoneEnabled,
+              enabledIcon: Icons.mic_rounded,
+              disabledIcon: Icons.mic_off_rounded,
+              enabledLabel: 'Turn microphone off',
+              disabledLabel: 'Turn microphone on',
+              onPressed: onMicrophonePressed,
+            ),
+            const SizedBox(width: 6),
+            _MediaControlButton(
+              key: const Key('toggle_camera'),
+              enabled: cameraEnabled,
+              enabledIcon: Icons.videocam_rounded,
+              disabledIcon: Icons.videocam_off_rounded,
+              enabledLabel: 'Turn camera off',
+              disabledLabel: 'Turn camera on',
+              onPressed: onCameraPressed,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MediaControlButton extends StatelessWidget {
+  const _MediaControlButton({
+    super.key,
+    required this.enabled,
+    required this.enabledIcon,
+    required this.disabledIcon,
+    required this.enabledLabel,
+    required this.disabledLabel,
+    required this.onPressed,
+  });
+
+  final bool enabled;
+  final IconData enabledIcon;
+  final IconData disabledIcon;
+  final String enabledLabel;
+  final String disabledLabel;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = enabled ? enabledLabel : disabledLabel;
+    return Semantics(
+      button: true,
+      label: label,
+      child: Tooltip(
+        message: label,
+        child: IconButton(
+          onPressed: onPressed,
+          style: IconButton.styleFrom(
+            backgroundColor: enabled ? const Color(0xFF245B86) : errorRed,
+            foregroundColor: Colors.white,
+            minimumSize: const Size(46, 46),
+          ),
+          icon: Icon(enabled ? enabledIcon : disabledIcon),
         ),
       ),
     );
@@ -1243,26 +1344,6 @@ class _LiveMetric extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _DemoButton extends StatelessWidget {
-  const _DemoButton({super.key, required this.label, required this.onPressed});
-  final String label;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return OutlinedButton(
-      style: OutlinedButton.styleFrom(
-        foregroundColor: Colors.white,
-        side: const BorderSide(color: Color(0xFF57718C)),
-        minimumSize: const Size(0, 42),
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-      ),
-      onPressed: onPressed,
-      child: Text(label, style: const TextStyle(fontSize: 13)),
     );
   }
 }
@@ -1613,19 +1694,21 @@ class _ReportScreenState extends State<ReportScreen> {
                           )
                         : Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
-                            children: report.gestureCounts.entries.map(
-                              (entry) => Padding(
-                                padding: const EdgeInsets.only(bottom: 8.0),
-                                child: Text(
-                                  '${entry.key}: ${entry.value} times',
-                                  style: const TextStyle(
-                                    color: Color(0xFF334155),
-                                    height: 1.4,
-                                    fontSize: 15,
+                            children: report.gestureCounts.entries
+                                .map(
+                                  (entry) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 8.0),
+                                    child: Text(
+                                      '${entry.key}: ${entry.value} times',
+                                      style: const TextStyle(
+                                        color: Color(0xFF334155),
+                                        height: 1.4,
+                                        fontSize: 15,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ),
-                            ).toList(),
+                                )
+                                .toList(),
                           ),
                   ),
                 ),

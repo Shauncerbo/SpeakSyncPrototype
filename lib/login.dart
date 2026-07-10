@@ -9,6 +9,10 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  // Temporary development shortcut. Set this to false to restore the existing
+  // email/password validation and mock account check below.
+  bool get _bypassLoginForDevelopment => true;
+
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -25,6 +29,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
   // --- TEMPORARY MOCK LOGIN LOGIC ---
   void _submitLogin() async {
+    if (_bypassLoginForDevelopment) {
+      Navigator.of(context).pushReplacementNamed('/home');
+      return;
+    }
+
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
