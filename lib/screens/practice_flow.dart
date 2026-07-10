@@ -548,14 +548,13 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
 
   Future<void> _prepareCamera() async {
     final cameraStatus = await Permission.camera.request();
-    final microphoneStatus = await Permission.microphone.request();
     if (!mounted) return;
 
-    if (!cameraStatus.isGranted || !microphoneStatus.isGranted) {
+    if (!cameraStatus.isGranted) {
       setState(() {
         _cameraReady = false;
         _cameraStatus =
-            'Camera and microphone access are required to record rehearsal video.';
+            'Camera access is required to record rehearsal video.';
       });
       return;
     }
@@ -587,10 +586,11 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
         _cameraReady = true;
         _cameraStatus = 'Camera ready';
       });
-    } catch (_) {
+    } catch (e) {
+      print('Camera initialization error: $e');
       setState(() {
         _cameraReady = false;
-        _cameraStatus = 'Unable to initialize camera.';
+        _cameraStatus = 'Unable to initialize camera. Error: $e';
       });
     }
   }

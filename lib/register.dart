@@ -27,7 +27,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _middleNameController.dispose();
     _lastNameController.dispose();
     _emailController.dispose();
-    _passwordController.dispose();
+    _passwordController.dispose();  
     _confirmPasswordController.dispose();
     super.dispose();
   }

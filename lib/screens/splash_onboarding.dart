@@ -6,7 +6,6 @@ import '../app.dart';
 import '../core/app_theme.dart';
 import '../login.dart';
 import '../widgets/common_widgets.dart';
-import 'main_shell.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});

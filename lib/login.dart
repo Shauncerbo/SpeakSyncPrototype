@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'auth_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -43,7 +42,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (email == scriptedEmail && password == scriptedPassword) {
         Navigator.of(context).pushReplacementNamed('/home');
       } else {
-        _showErrorSnackBar('Invalid credentials. Try student@speaksync.com / capstone123');
+        _showErrorSnackBar('Invalid credentials.');
       }
       setState(() => _isLoading = false);
     }
