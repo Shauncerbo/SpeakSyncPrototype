@@ -5,6 +5,7 @@ class PracticeSettings {
     required this.languageMode,
     required this.selectedDuration,
     required this.monitorBodyLanguage,
+    required this.monitorCameraAttention,
     required this.monitorFillers,
     required this.monitorPace,
     required this.enableLiveFeedback,
@@ -15,6 +16,7 @@ class PracticeSettings {
   final String languageMode;
   final String selectedDuration;
   final bool monitorBodyLanguage;
+  final bool monitorCameraAttention;
   final bool monitorFillers;
   final bool monitorPace;
   final bool enableLiveFeedback;

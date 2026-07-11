@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import 'home_screen.dart';
-import 'practice_flow.dart';
 import 'progress_screens.dart';
 import 'settings_screens.dart';
 
@@ -33,20 +32,9 @@ class _MainShellState extends State<MainShell> {
       const ProgressScreen(),
       const SettingsScreen(),
     ];
-    
+
     return Scaffold(
       body: IndexedStack(index: _index, children: pages),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          Navigator.of(context).push(
-            MaterialPageRoute<void>(builder: (_) => const PracticeSetupScreen()),
-          );
-        },
-        backgroundColor: const Color(0xFF67E8F9),
-        foregroundColor: const Color(0xFF0F172A),
-        tooltip: 'Practice',
-        child: const Icon(Icons.mic_rounded),
-      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: _select,

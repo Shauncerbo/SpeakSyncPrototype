@@ -13,6 +13,16 @@ class ProgressScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = AppStateScope.of(context);
     final sessions = state.sessions;
+    final rankedSessions = [...sessions]
+      ..sort((a, b) => b.overallScore.compareTo(a.overallScore));
+    final chronologicalSessions = [...sessions]
+      ..sort((a, b) => b.dateTime.compareTo(a.dateTime));
+    final latestSession = chronologicalSessions.isEmpty
+        ? null
+        : chronologicalSessions.first;
+    final previousSession = chronologicalSessions.length > 1
+        ? chronologicalSessions[1]
+        : null;
     return SafeArea(
       child: CustomScrollView(
         slivers: [
@@ -87,6 +97,38 @@ class ProgressScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 28),
+                  const SectionHeader('Rehearsal Ranking'),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Your completed rehearsals, ranked by overall score.',
+                    style: TextStyle(color: Color(0xFF617085), fontSize: 13),
+                  ),
+                  const SizedBox(height: 12),
+                  if (rankedSessions.isEmpty)
+                    const InfoBanner(
+                      icon: Icons.emoji_events_outlined,
+                      title: 'No rankings yet',
+                      message: 'Complete a rehearsal to enter the ranking.',
+                    )
+                  else
+                    ...rankedSessions.indexed.map(
+                      (entry) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _RankingCard(
+                          rank: entry.$1 + 1,
+                          session: entry.$2,
+                          isBest: entry.$1 == 0,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 14),
+                  _ImprovementInsightCard(
+                    latestSession: latestSession,
+                    previousSession: previousSession,
+                  ),
+                  const SizedBox(height: 12),
+                  _WeakestAreaCard(session: latestSession),
+                  const SizedBox(height: 26),
                   const SectionHeader('Session history'),
                   const SizedBox(height: 12),
                   if (sessions.isEmpty)
@@ -115,6 +157,290 @@ class ProgressScreen extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ImprovementInsightCard extends StatelessWidget {
+  const _ImprovementInsightCard({
+    required this.latestSession,
+    required this.previousSession,
+  });
+
+  final PracticeSession? latestSession;
+  final PracticeSession? previousSession;
+
+  @override
+  Widget build(BuildContext context) {
+    final latest = latestSession;
+    final previous = previousSession;
+    final difference = latest != null && previous != null
+        ? latest.overallScore - previous.overallScore
+        : null;
+    final isImprovement = difference != null && difference > 0;
+    final color = difference == null || difference == 0
+        ? primaryBlue
+        : isImprovement
+        ? accentTeal
+        : warningOrange;
+    final message = switch (difference) {
+      null => 'Complete two rehearsals to see how your score changes.',
+      > 0 => 'You improved by +$difference points from your last rehearsal.',
+      < 0 =>
+        'Your score dropped by $difference points. Try reducing filler words next time.',
+      _ => 'Your score stayed steady. Keep practicing to move it higher.',
+    };
+
+    return _ProgressInsightCard(
+      title: 'Improvement Insight',
+      message: message,
+      icon: isImprovement
+          ? Icons.trending_up_rounded
+          : difference != null && difference < 0
+          ? Icons.trending_down_rounded
+          : Icons.insights_rounded,
+      color: color,
+    );
+  }
+}
+
+class _WeakestAreaCard extends StatelessWidget {
+  const _WeakestAreaCard({required this.session});
+
+  final PracticeSession? session;
+
+  @override
+  Widget build(BuildContext context) {
+    final latest = session;
+    if (latest == null) {
+      return const _ProgressInsightCard(
+        title: 'Weakest Area Summary',
+        message: 'Complete a rehearsal to receive a coaching focus.',
+        icon: Icons.track_changes_rounded,
+        color: accentTeal,
+      );
+    }
+
+    final areas = <({String label, int score, String coaching})>[
+      (
+        label: 'Filler words',
+        score: latest.fillerScore,
+        coaching: 'Replace filler words with a brief, confident pause.',
+      ),
+      (
+        label: 'Posture',
+        score: latest.postureScore,
+        coaching: 'Keep your shoulders relaxed and your stance steady.',
+      ),
+      (
+        label: 'Speaking pace',
+        score: latest.paceScore,
+        coaching: 'Slow down slightly and pause between key ideas.',
+      ),
+      (
+        label: 'Camera-facing attention',
+        score: latest.attentionScore,
+        coaching: 'Try looking toward the camera more often.',
+      ),
+    ]..sort((a, b) => a.score.compareTo(b.score));
+    final weakest = areas.first;
+
+    return _ProgressInsightCard(
+      title: 'Weakest Area Summary',
+      message:
+          'Main area to improve: ${weakest.label} (${weakest.score}). ${weakest.coaching}',
+      icon: Icons.track_changes_rounded,
+      color: accentTeal,
+    );
+  }
+}
+
+class _ProgressInsightCard extends StatelessWidget {
+  const _ProgressInsightCard({
+    required this.title,
+    required this.message,
+    required this.icon,
+    required this.color,
+  });
+
+  final String title;
+  final String message;
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: Color(0xFFE2E8F0)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: .12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: navy,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    message,
+                    style: const TextStyle(
+                      color: Color(0xFF526277),
+                      fontSize: 13,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RankingCard extends StatelessWidget {
+  const _RankingCard({
+    required this.rank,
+    required this.session,
+    required this.isBest,
+  });
+
+  final int rank;
+  final PracticeSession session;
+  final bool isBest;
+
+  @override
+  Widget build(BuildContext context) {
+    final highlight = isBest ? warningOrange : primaryBlue;
+    return Card(
+      margin: EdgeInsets.zero,
+      elevation: isBest ? 2 : 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: isBest
+              ? warningOrange.withValues(alpha: .55)
+              : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: highlight.withValues(alpha: .12),
+                shape: BoxShape.circle,
+              ),
+              child: Text(
+                '#$rank',
+                style: TextStyle(color: highlight, fontWeight: FontWeight.w900),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (isBest) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: warningOrange.withValues(alpha: .12),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Text(
+                        'BEST REHEARSAL',
+                        style: TextStyle(
+                          color: Color(0xFF9A5B00),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: .4,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                  ],
+                  Text(
+                    session.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: navy,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${formatDate(session.dateTime)} • ${session.speechType}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF617085),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  '${session.overallScore}',
+                  style: TextStyle(
+                    color: highlight,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const Text(
+                  'SCORE',
+                  style: TextStyle(
+                    color: Color(0xFF7A8798),
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: .5,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -251,35 +577,6 @@ class SessionDetailsScreen extends StatelessWidget {
                         fontSize: 15,
                       ),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 26),
-                const SectionHeader('Repeated gestures'),
-                const SizedBox(height: 12),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: session.gestureCounts.isEmpty
-                        ? const Text(
-                            'No repeated gestures detected.',
-                            style: TextStyle(color: Color(0xFF617085)),
-                          )
-                        : Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: session.gestureCounts.entries.map(
-                              (entry) => Padding(
-                                padding: const EdgeInsets.only(bottom: 8.0),
-                                child: Text(
-                                  '${entry.key}: ${entry.value} times',
-                                  style: const TextStyle(
-                                    color: Color(0xFF334155),
-                                    height: 1.4,
-                                    fontSize: 15,
-                                  ),
-                                ),
-                              ),
-                            ).toList(),
-                          ),
                   ),
                 ),
                 const SizedBox(height: 26),

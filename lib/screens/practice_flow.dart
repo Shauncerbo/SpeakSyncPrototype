@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -24,13 +25,15 @@ class PracticeSetupScreen extends StatefulWidget {
 class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
-  String _speechType = 'Prepared';
-  String _languageMode = 'Mixed Language';
-  String _duration = '3 minutes';
+  String? _speechType;
+  String? _languageMode;
+  String? _duration;
   bool _body = true;
+  bool _cameraAttention = true;
   bool _fillers = true;
   bool _pace = true;
   bool _live = true;
+  bool _loadedPreferences = false;
 
   static const _speechTypes = [
     'Prepared',
@@ -53,6 +56,19 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
   ];
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_loadedPreferences) return;
+    final preferences = AppStateScope.of(context, listen: false).preferences;
+    _body = preferences.bodyMonitoring;
+    _cameraAttention = preferences.cameraAttentionMonitoring;
+    _fillers = preferences.fillerMonitoring;
+    _pace = preferences.paceMonitoring;
+    _live = preferences.liveFeedback;
+    _loadedPreferences = true;
+  }
+
+  @override
   void dispose() {
     _titleController.dispose();
     super.dispose();
@@ -62,10 +78,11 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
     if (!_formKey.currentState!.validate()) return;
     final settings = PracticeSettings(
       speechTitle: _titleController.text.trim(),
-      speechType: _speechType,
-      languageMode: _languageMode,
-      selectedDuration: _duration,
+      speechType: _speechType!,
+      languageMode: _languageMode!,
+      selectedDuration: _duration!,
       monitorBodyLanguage: _body,
+      monitorCameraAttention: _cameraAttention,
       monitorFillers: _fillers,
       monitorPace: _pace,
       enableLiveFeedback: _live,
@@ -126,6 +143,7 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                   _DropdownField(
                     key: const Key('speech_type'),
                     label: 'Speech type',
+                    hint: 'Select speech type',
                     icon: Icons.category_outlined,
                     value: _speechType,
                     items: _speechTypes,
@@ -135,6 +153,7 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                   _DropdownField(
                     key: const Key('language_mode'),
                     label: 'Language mode',
+                    hint: 'Select language mode',
                     icon: Icons.translate_rounded,
                     value: _languageMode,
                     items: _languages,
@@ -144,26 +163,42 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                   _DropdownField(
                     key: const Key('duration'),
                     label: 'Target duration',
+                    hint: 'Select target duration',
                     icon: Icons.timer_outlined,
                     value: _duration,
                     items: _durations,
                     onChanged: (value) => setState(() => _duration = value),
                   ),
                   const SizedBox(height: 26),
-                  const SectionHeader('Monitoring'),
+                  const SectionHeader('Detection settings'),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Choose what the prototype should monitor during rehearsal.',
+                    style: TextStyle(color: Color(0xFF617085), fontSize: 13),
+                  ),
                   const SizedBox(height: 12),
                   Card(
                     child: Column(
                       children: [
                         SwitchListTile(
                           key: const Key('body_monitoring'),
-                          title: const Text('Body-language monitoring'),
-                          subtitle: const Text('Posture and camera attention'),
+                          title: const Text('Posture monitoring'),
+                          subtitle: const Text('Upper-body posture and stance'),
                           secondary: const Icon(
                             Icons.accessibility_new_rounded,
                           ),
                           value: _body,
                           onChanged: (value) => setState(() => _body = value),
+                        ),
+                        const Divider(height: 1, indent: 16, endIndent: 16),
+                        SwitchListTile(
+                          key: const Key('camera_attention_monitoring'),
+                          title: const Text('Camera-facing attention'),
+                          subtitle: const Text('Looking toward the camera'),
+                          secondary: const Icon(Icons.visibility_outlined),
+                          value: _cameraAttention,
+                          onChanged: (value) =>
+                              setState(() => _cameraAttention = value),
                         ),
                         const Divider(height: 1, indent: 16, endIndent: 16),
                         SwitchListTile(
@@ -231,6 +266,7 @@ class _DropdownField extends StatelessWidget {
   const _DropdownField({
     super.key,
     required this.label,
+    required this.hint,
     required this.icon,
     required this.value,
     required this.items,
@@ -238,8 +274,9 @@ class _DropdownField extends StatelessWidget {
   });
 
   final String label;
+  final String hint;
   final IconData icon;
-  final String value;
+  final String? value;
   final List<String> items;
   final ValueChanged<String> onChanged;
 
@@ -248,13 +285,18 @@ class _DropdownField extends StatelessWidget {
     return DropdownButtonFormField<String>(
       initialValue: value,
       isExpanded: true,
-      decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon)),
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        prefixIcon: Icon(icon),
+      ),
       items: items
           .map((item) => DropdownMenuItem(value: item, child: Text(item)))
           .toList(),
       onChanged: (value) {
         if (value != null) onChanged(value);
       },
+      validator: (value) => value == null ? 'Please choose $label.' : null,
     );
   }
 }
@@ -268,6 +310,7 @@ class DeviceCheckScreen extends StatefulWidget {
 
 class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
   bool _checking = false;
+  int _activeCheck = -1;
 
   @override
   void initState() {
@@ -280,14 +323,42 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
 
   Future<void> _recheck() async {
     if (_checking) return;
-    setState(() => _checking = true);
-    await Future<void>.delayed(AppTimingScope.of(context).deviceCheckDuration);
-    if (mounted) setState(() => _checking = false);
+    setState(() {
+      _checking = true;
+      _activeCheck = 0;
+    });
+    final stepDuration = AppTimingScope.of(context).deviceCheckDuration;
+    for (var index = 0; index < 5; index++) {
+      if (!mounted) return;
+      setState(() => _activeCheck = index);
+      await Future<void>.delayed(stepDuration);
+      if (!mounted) return;
+    }
+    if (mounted) {
+      setState(() {
+        _checking = false;
+        _activeCheck = -1;
+      });
+    }
+  }
+
+  String _checkStatus(int index, String readyStatus) {
+    if (_checking && _activeCheck == index) return 'Checking...';
+    if (_checking && _activeCheck < index) return 'Waiting';
+    return readyStatus;
   }
 
   @override
   Widget build(BuildContext context) {
     final setup = AppStateScope.of(context).currentSetup;
+    final selectedMonitoring = setup == null
+        ? <String>[]
+        : <String>[
+            if (setup.monitorFillers) 'Filler words',
+            if (setup.monitorPace) 'Speaking pace',
+            if (setup.monitorBodyLanguage) 'Posture',
+            if (setup.monitorCameraAttention) 'Camera attention',
+          ];
     return Scaffold(
       appBar: AppBar(title: const Text('Device Check')),
       body: SafeArea(
@@ -319,36 +390,41 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
                 StatusCard(
                   icon: Icons.videocam_outlined,
                   title: 'Camera',
-                  status: _checking ? 'Checking...' : 'Ready',
-                  isChecking: _checking,
+                  status: _checkStatus(0, 'Ready'),
+                  isChecking: _checking && _activeCheck == 0,
+                  isPending: _checking && _activeCheck < 0,
                 ),
                 const SizedBox(height: 10),
                 StatusCard(
                   icon: Icons.mic_none_rounded,
                   title: 'Microphone',
-                  status: _checking ? 'Checking...' : 'Ready',
-                  isChecking: _checking,
+                  status: _checkStatus(1, 'Ready'),
+                  isChecking: _checking && _activeCheck == 1,
+                  isPending: _checking && _activeCheck < 1,
                 ),
                 const SizedBox(height: 10),
                 StatusCard(
                   icon: Icons.light_mode_outlined,
                   title: 'Lighting',
-                  status: _checking ? 'Checking...' : 'Good',
-                  isChecking: _checking,
+                  status: _checkStatus(2, 'Good'),
+                  isChecking: _checking && _activeCheck == 2,
+                  isPending: _checking && _activeCheck < 2,
                 ),
                 const SizedBox(height: 10),
                 StatusCard(
                   icon: Icons.person_outline_rounded,
                   title: 'Upper Body',
-                  status: _checking ? 'Checking...' : 'Visible',
-                  isChecking: _checking,
+                  status: _checkStatus(3, 'Visible'),
+                  isChecking: _checking && _activeCheck == 3,
+                  isPending: _checking && _activeCheck < 3,
                 ),
                 const SizedBox(height: 10),
                 StatusCard(
                   icon: Icons.cloud_done_outlined,
                   title: 'Internet for Speech Processing',
-                  status: _checking ? 'Checking...' : 'Available',
-                  isChecking: _checking,
+                  status: _checkStatus(4, 'Available'),
+                  isChecking: _checking && _activeCheck == 4,
+                  isPending: _checking && _activeCheck < 4,
                 ),
                 const SizedBox(height: 24),
                 const SectionHeader('Before you begin'),
@@ -379,11 +455,13 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                const InfoBanner(
-                  icon: Icons.science_outlined,
-                  title: 'Prototype simulation',
-                  message: 'No real camera or microphone analysis is active.',
-                  color: accentTeal,
+                InfoBanner(
+                  icon: Icons.tune_rounded,
+                  title: 'Selected monitoring',
+                  message: selectedMonitoring.isEmpty
+                      ? 'No detection categories selected.'
+                      : selectedMonitoring.join(' • '),
+                  color: primaryBlue,
                 ),
                 const SizedBox(height: 22),
                 FilledButton.icon(
@@ -482,6 +560,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       'Maintain a steady upper-body posture and keep your eyes near the camera.';
   String? _alert;
   Color _alertColor = primaryBlue;
+  IconData _alertIcon = Icons.info_outline_rounded;
 
   final List<String> _transcriptSamples = const [
     'Today I will talk about why practice matters in every presentation, ano.',
@@ -509,15 +588,56 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     _prepareCamera();
   }
 
-  void _showAlert(String message, Color color) {
+  void _showAlert(
+    String message,
+    Color color, {
+    IconData icon = Icons.info_outline_rounded,
+  }) {
     _alertTimer?.cancel();
     setState(() {
       _alert = message;
       _alertColor = color;
+      _alertIcon = icon;
     });
-    _alertTimer = Timer(const Duration(seconds: 3), () {
+    _alertTimer = Timer(const Duration(milliseconds: 2400), () {
       if (mounted) setState(() => _alert = null);
     });
+  }
+
+  void _simulatePostureAlert() {
+    _posture = 'Adjust';
+    _showAlert(
+      'Posture needs correction',
+      warningOrange,
+      icon: Icons.accessibility_new_rounded,
+    );
+  }
+
+  void _simulateCameraAttentionAlert() {
+    _attention = 64;
+    _showAlert(
+      'Look toward the camera',
+      warningOrange,
+      icon: Icons.visibility_outlined,
+    );
+  }
+
+  void _simulateFillerAlert() {
+    _fillers.update('Kuan', (count) => count + 1, ifAbsent: () => 1);
+    _showAlert(
+      'Filler word detected',
+      warningOrange,
+      icon: Icons.chat_bubble_outline_rounded,
+    );
+  }
+
+  void _simulateFastSpeechAlert() {
+    _pace = 'Too Fast';
+    _showAlert(
+      'Speaking too fast — slow down',
+      warningOrange,
+      icon: Icons.speed_rounded,
+    );
   }
 
   Future<void> _prepareCamera() async {
@@ -641,6 +761,43 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     if (_elapsedSeconds == 0 || _elapsedSeconds % 5 != 0) return;
     final nextLine = _transcriptSamples[_transcriptLines.length];
     _transcriptLines.add(nextLine);
+    final setup = AppStateScope.of(context, listen: false).currentSetup!;
+
+    // Prototype signals stand in for the on-device vision analysis planned for
+    // production. They keep the feedback treatment testable without audio.
+    if (_transcriptLines.length == 3 && setup.monitorBodyLanguage) {
+      _posture = 'Adjust';
+      _showAlert(
+        'Posture needs correction',
+        warningOrange,
+        icon: Icons.accessibility_new_rounded,
+      );
+      return;
+    } else if (_transcriptLines.length == 4 && setup.monitorCameraAttention) {
+      _attention = 64;
+      _showAlert(
+        'Look toward the camera',
+        warningOrange,
+        icon: Icons.visibility_outlined,
+      );
+      return;
+    }
+
+    if (!setup.monitorFillers) return;
+    const fillerWords = ['ano', 'parang', 'kuan', 'kanang', 'mura\'g', 'bitaw'];
+    final normalizedLine = nextLine.toLowerCase();
+    for (final filler in fillerWords) {
+      if (normalizedLine.contains(RegExp('\\b${RegExp.escape(filler)}\\b'))) {
+        final label = filler[0].toUpperCase() + filler.substring(1);
+        _fillers.update(label, (count) => count + 1, ifAbsent: () => 1);
+        _showAlert(
+          'Filler word detected',
+          warningOrange,
+          icon: Icons.chat_bubble_outline_rounded,
+        );
+        return;
+      }
+    }
   }
 
   Future<void> _confirmEnd() async {
@@ -822,6 +979,71 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                           cameraStatus: _cameraStatus,
                         ),
                       ),
+                      if (_alert != null && setup.enableLiveFeedback)
+                        Positioned(
+                          top: 12,
+                          left: 12,
+                          right: 12,
+                          child: Center(
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 180),
+                              child: Container(
+                                key: ValueKey(_alert),
+                                constraints: const BoxConstraints(
+                                  maxWidth: 360,
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xE61A2938),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: _alertColor.withValues(alpha: .55),
+                                  ),
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Color(0x33000000),
+                                      blurRadius: 8,
+                                      offset: Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      _alertIcon,
+                                      color: _alertColor,
+                                      size: 17,
+                                    ),
+                                    const SizedBox(width: 7),
+                                    Flexible(
+                                      child: Text(
+                                        _alert!,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      Positioned(
+                        left: 12,
+                        bottom: 48,
+                        child: _MicrophoneLevelIndicator(
+                          enabled: _microphoneEnabled,
+                        ),
+                      ),
                       Positioned(
                         bottom: 0,
                         child: _MediaControls(
@@ -834,77 +1056,121 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 220),
-                    child: _alert == null || !setup.enableLiveFeedback
-                        ? const SizedBox(height: 14)
-                        : Container(
-                            key: ValueKey(_alert),
-                            width: double.infinity,
-                            margin: const EdgeInsets.only(top: 12),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 11,
-                            ),
-                            decoration: BoxDecoration(
-                              color: _alertColor.withValues(alpha: .16),
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: _alertColor.withValues(alpha: .45),
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.tips_and_updates_outlined,
-                                  color: _alertColor,
-                                  size: 20,
-                                ),
-                                const SizedBox(width: 9),
-                                Text(
-                                  _alert!,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ],
+                  if (setup.enableLiveFeedback) ...[
+                    Container(
+                      key: const Key('prototype_alert_controls'),
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10243A),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFF29435E)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Test live alerts',
+                            style: TextStyle(
+                              color: Color(0xFFB9C9D9),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
-                  ),
-                  const SizedBox(height: 6),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              if (setup.monitorBodyLanguage)
+                                _AlertTestButton(
+                                  key: const Key('test_posture_alert'),
+                                  icon: Icons.accessibility_new_rounded,
+                                  label: 'Posture',
+                                  onPressed: _simulatePostureAlert,
+                                ),
+                              if (setup.monitorCameraAttention)
+                                _AlertTestButton(
+                                  key: const Key('test_camera_alert'),
+                                  icon: Icons.visibility_outlined,
+                                  label: 'Camera gaze',
+                                  onPressed: _simulateCameraAttentionAlert,
+                                ),
+                              if (setup.monitorFillers)
+                                _AlertTestButton(
+                                  key: const Key('test_filler_alert'),
+                                  icon: Icons.chat_bubble_outline_rounded,
+                                  label: 'Filler word',
+                                  onPressed: _simulateFillerAlert,
+                                ),
+                              if (setup.monitorPace)
+                                _AlertTestButton(
+                                  key: const Key('test_fast_speech_alert'),
+                                  icon: Icons.speed_rounded,
+                                  label: 'Fast speech',
+                                  onPressed: _simulateFastSpeechAlert,
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   GridView.count(
                     crossAxisCount: 2,
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     mainAxisSpacing: 10,
                     crossAxisSpacing: 10,
-                    childAspectRatio: 1.8,
+                    childAspectRatio: 1.35,
                     children: [
                       _LiveMetric(
                         label: 'Speaking Pace',
-                        value: _pace,
+                        value: setup.monitorPace ? _pace : 'Off',
                         icon: Icons.speed_rounded,
                         good: _pace == 'Normal',
+                        enabled: setup.monitorPace,
+                        progress: _pace == 'Normal' ? .82 : .42,
+                        description: _pace == 'Normal'
+                            ? 'Good speaking rhythm'
+                            : 'Slow down slightly',
                       ),
                       _LiveMetric(
                         label: 'Posture',
-                        value: _posture,
+                        value: setup.monitorBodyLanguage ? _posture : 'Off',
                         icon: Icons.accessibility_new_rounded,
                         good: _posture == 'Good',
+                        enabled: setup.monitorBodyLanguage,
+                        progress: _posture == 'Good' ? .9 : .48,
+                        description: _posture == 'Good'
+                            ? 'Upper body is steady'
+                            : 'Straighten your posture',
                       ),
                       _LiveMetric(
                         label: 'Camera Attention',
-                        value: '$_attention%',
+                        value: setup.monitorCameraAttention
+                            ? '$_attention%'
+                            : 'Off',
                         icon: Icons.center_focus_strong,
                         good: _attention >= 70,
+                        enabled: setup.monitorCameraAttention,
+                        progress: _attention / 100,
+                        description: _attention >= 70
+                            ? 'Strong camera focus'
+                            : 'Look toward the camera',
                       ),
                       _LiveMetric(
                         key: const Key('filler_metric'),
                         label: 'Fillers Detected',
-                        value: '$_fillerTotal',
+                        value: setup.monitorFillers ? '$_fillerTotal' : 'Off',
                         icon: Icons.chat_bubble_outline,
                         good: _fillerTotal == 0,
+                        enabled: setup.monitorFillers,
+                        progress: (1 - (_fillerTotal / 8)).clamp(0, 1),
+                        description: _fillerTotal == 0
+                            ? 'No fillers detected'
+                            : 'Try a quiet pause',
                       ),
                     ],
                   ),
@@ -1191,6 +1457,108 @@ class _CameraOffView extends StatelessWidget {
   }
 }
 
+class _MicrophoneLevelIndicator extends StatefulWidget {
+  const _MicrophoneLevelIndicator({required this.enabled});
+
+  final bool enabled;
+
+  @override
+  State<_MicrophoneLevelIndicator> createState() =>
+      _MicrophoneLevelIndicatorState();
+}
+
+class _MicrophoneLevelIndicatorState extends State<_MicrophoneLevelIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.enabled) _controller.repeat();
+  }
+
+  @override
+  void didUpdateWidget(covariant _MicrophoneLevelIndicator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.enabled == oldWidget.enabled) return;
+    if (widget.enabled) {
+      _controller.repeat();
+    } else {
+      _controller.stop();
+      _controller.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.enabled ? successGreen : const Color(0xFF8A99A8);
+    return Semantics(
+      label: widget.enabled ? 'Microphone active' : 'Microphone muted',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: const Color(0xD9142535),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: color.withValues(alpha: .55)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              widget.enabled ? Icons.mic_rounded : Icons.mic_off_rounded,
+              color: color,
+              size: 15,
+            ),
+            const SizedBox(width: 6),
+            AnimatedBuilder(
+              animation: _controller,
+              builder: (context, child) => Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: List.generate(5, (index) {
+                  final movement = widget.enabled
+                      ? math
+                            .sin(
+                              (_controller.value * math.pi * 2) + (index * .9),
+                            )
+                            .abs()
+                      : 0.0;
+                  return Container(
+                    width: 2.5,
+                    height: 4 + (movement * 12),
+                    margin: const EdgeInsets.symmetric(horizontal: 1.2),
+                    decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  );
+                }),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              widget.enabled ? 'Mic active' : 'Muted',
+              style: TextStyle(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _MediaControls extends StatelessWidget {
   const _MediaControls({
     required this.microphoneEnabled,
@@ -1286,6 +1654,34 @@ class _MediaControlButton extends StatelessWidget {
   }
 }
 
+class _AlertTestButton extends StatelessWidget {
+  const _AlertTestButton({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 16),
+      label: Text(label),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: const Color(0xFFD8E5F1),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+        visualDensity: VisualDensity.compact,
+        side: const BorderSide(color: Color(0xFF45627E)),
+      ),
+    );
+  }
+}
+
 class _LiveMetric extends StatelessWidget {
   const _LiveMetric({
     super.key,
@@ -1293,53 +1689,95 @@ class _LiveMetric extends StatelessWidget {
     required this.value,
     required this.icon,
     required this.good,
+    required this.enabled,
+    required this.progress,
+    required this.description,
   });
 
   final String label;
   final String value;
   final IconData icon;
   final bool good;
+  final bool enabled;
+  final double progress;
+  final String description;
 
   @override
   Widget build(BuildContext context) {
-    final color = good ? const Color(0xFF5FE3B3) : const Color(0xFFFFA48A);
+    final color = !enabled
+        ? const Color(0xFF8A99A8)
+        : good
+        ? const Color(0xFF5FE3B3)
+        : const Color(0xFFFFA24C);
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(13),
       decoration: BoxDecoration(
         color: const Color(0xFF102A46),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0xFF294966)),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: color, size: 21),
-          const SizedBox(width: 9),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
+          Row(
+            children: [
+              Icon(icon, color: color, size: 20),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
                   label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: Color(0xFF9EB1C7),
+                    color: Color(0xFFC3D0DE),
                     fontSize: 11,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: .12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  enabled ? '● LIVE' : 'OFF',
                   style: TextStyle(
                     color: color,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 8,
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
-              ],
+              ),
+            ],
+          ),
+          const Spacer(),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: color,
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            enabled ? description : 'Monitoring disabled',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Color(0xFF91A5BA), fontSize: 9.5),
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: enabled ? progress : 0,
+              minHeight: 4,
+              color: color,
+              backgroundColor: const Color(0xFF294966),
             ),
           ),
         ],
@@ -1679,37 +2117,6 @@ class _ReportScreenState extends State<ReportScreen> {
                         fontSize: 15,
                       ),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 28),
-                const SectionHeader('Repeated gestures'),
-                const SizedBox(height: 12),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: report.gestureCounts.isEmpty
-                        ? const Text(
-                            'No repeated gestures detected.',
-                            style: TextStyle(color: Color(0xFF617085)),
-                          )
-                        : Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: report.gestureCounts.entries
-                                .map(
-                                  (entry) => Padding(
-                                    padding: const EdgeInsets.only(bottom: 8.0),
-                                    child: Text(
-                                      '${entry.key}: ${entry.value} times',
-                                      style: const TextStyle(
-                                        color: Color(0xFF334155),
-                                        height: 1.4,
-                                        fontSize: 15,
-                                      ),
-                                    ),
-                                  ),
-                                )
-                                .toList(),
-                          ),
                   ),
                 ),
                 const SizedBox(height: 28),

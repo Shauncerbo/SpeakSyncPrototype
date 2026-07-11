@@ -11,6 +11,14 @@ class SettingsScreen extends StatelessWidget {
 
   void _update(BuildContext context, AppPreferences preferences) {
     AppStateScope.of(context, listen: false).updatePreferences(preferences);
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('Settings saved.'),
+          duration: Duration(milliseconds: 900),
+        ),
+      );
   }
 
   Future<void> _privacy(BuildContext context) {
@@ -28,11 +36,33 @@ class SettingsScreen extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _DialogPoint('No real recording'),
-            _DialogPoint('No backend'),
-            _DialogPoint('No cloud upload'),
-            _DialogPoint('Dummy data only'),
+            _DialogPoint('Camera and microphone are used during rehearsal.'),
+            _DialogPoint('Reports stay inside the prototype.'),
+            _DialogPoint('No cloud upload or automatic sharing.'),
+            _DialogPoint('You can reset all dummy data in Settings.'),
           ],
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _savedData(BuildContext context) {
+    final state = AppStateScope.of(context, listen: false);
+    return showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.storage_outlined, color: primaryBlue),
+        title: const Text('Saved rehearsal data'),
+        content: Text(
+          '${state.sessions.length} rehearsal sessions are currently available, '
+          'using ${state.totalPracticeTime.inMinutes} minutes of prototype practice data.\n\n'
+          'Hive persistence is planned but is not connected yet, so this data resets when the app state is restarted.',
         ),
         actions: [
           FilledButton(
@@ -212,45 +242,119 @@ class SettingsScreen extends StatelessWidget {
                           }
                         },
                       ),
-                      const SizedBox(height: 8),
-                      SwitchListTile(
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              const SectionHeader('Monitoring'),
+              const SizedBox(height: 12),
+              Card(
+                child: Column(
+                  children: [
+                    _PreferenceSwitch(
+                      key: const Key('settings_body_monitoring'),
+                      icon: Icons.accessibility_new_rounded,
+                      title: 'Posture monitoring',
+                      subtitle: 'Monitor upper-body posture and stance',
+                      value: preferences.bodyMonitoring,
+                      onChanged: (value) => _update(
+                        context,
+                        preferences.copyWith(bodyMonitoring: value),
+                      ),
+                    ),
+                    const Divider(height: 1, indent: 16, endIndent: 16),
+                    _PreferenceSwitch(
+                      key: const Key('settings_camera_attention'),
+                      icon: Icons.visibility_outlined,
+                      title: 'Camera-facing attention',
+                      subtitle: 'Remind me when I look away',
+                      value: preferences.cameraAttentionMonitoring,
+                      onChanged: (value) => _update(
+                        context,
+                        preferences.copyWith(cameraAttentionMonitoring: value),
+                      ),
+                    ),
+                    const Divider(height: 1, indent: 16, endIndent: 16),
+                    _PreferenceSwitch(
+                      key: const Key('settings_filler_monitoring'),
+                      icon: Icons.chat_bubble_outline_rounded,
+                      title: 'Filler-word monitoring',
+                      subtitle: 'Track selected Filipino-Bisaya fillers',
+                      value: preferences.fillerMonitoring,
+                      onChanged: (value) => _update(
+                        context,
+                        preferences.copyWith(fillerMonitoring: value),
+                      ),
+                    ),
+                    const Divider(height: 1, indent: 16, endIndent: 16),
+                    _PreferenceSwitch(
+                      key: const Key('settings_pace_monitoring'),
+                      icon: Icons.speed_rounded,
+                      title: 'Speaking-pace monitoring',
+                      subtitle: 'Track speech that is too fast or too slow',
+                      value: preferences.paceMonitoring,
+                      onChanged: (value) => _update(
+                        context,
+                        preferences.copyWith(paceMonitoring: value),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              const SectionHeader('Feedback'),
+              const SizedBox(height: 12),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
+                  child: Column(
+                    children: [
+                      _PreferenceSwitch(
                         key: const Key('settings_live_feedback'),
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Live feedback'),
+                        icon: Icons.tips_and_updates_outlined,
+                        title: 'Real-time coaching alerts',
+                        subtitle:
+                            'Show silent feedback over the camera preview',
                         value: preferences.liveFeedback,
                         onChanged: (value) => _update(
                           context,
                           preferences.copyWith(liveFeedback: value),
                         ),
                       ),
-                      SwitchListTile(
-                        key: const Key('settings_vibration_feedback'),
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Vibration feedback'),
-                        value: preferences.vibrationFeedback,
-                        onChanged: (value) => _update(
-                          context,
-                          preferences.copyWith(vibrationFeedback: value),
-                        ),
-                      ),
-                      SwitchListTile(
-                        key: const Key('settings_body_monitoring'),
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Body-language monitoring'),
-                        value: preferences.bodyMonitoring,
-                        onChanged: (value) => _update(
-                          context,
-                          preferences.copyWith(bodyMonitoring: value),
-                        ),
-                      ),
-                      SwitchListTile(
-                        key: const Key('settings_filler_monitoring'),
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Filler-word monitoring'),
-                        value: preferences.fillerMonitoring,
-                        onChanged: (value) => _update(
-                          context,
-                          preferences.copyWith(fillerMonitoring: value),
+                      const Divider(height: 1, indent: 8, endIndent: 8),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 12, 8, 0),
+                        child: DropdownButtonFormField<String>(
+                          initialValue: preferences.alertFrequency,
+                          decoration: const InputDecoration(
+                            labelText: 'Alert frequency',
+                            helperText:
+                                'How often coaching reminders may appear',
+                            prefixIcon: Icon(
+                              Icons.notifications_active_outlined,
+                            ),
+                          ),
+                          items: const ['Low', 'Balanced', 'Frequent']
+                              .map(
+                                (value) => DropdownMenuItem(
+                                  value: value,
+                                  child: Text(value),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: preferences.liveFeedback
+                              ? (value) {
+                                  if (value != null) {
+                                    _update(
+                                      context,
+                                      preferences.copyWith(
+                                        alertFrequency: value,
+                                      ),
+                                    );
+                                  }
+                                }
+                              : null,
                         ),
                       ),
                     ],
@@ -258,6 +362,8 @@ class SettingsScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 24),
+              const SectionHeader('Data & privacy'),
+              const SizedBox(height: 12),
               Card(
                 child: Column(
                   children: [
@@ -269,6 +375,24 @@ class SettingsScreen extends StatelessWidget {
                       onTap: () => _privacy(context),
                     ),
                     const Divider(height: 1, indent: 16, endIndent: 16),
+                    ListTile(
+                      leading: const Icon(Icons.storage_outlined),
+                      title: const Text('Saved rehearsal data'),
+                      subtitle: Text(
+                        '${AppStateScope.of(context).sessions.length} sessions stored in this prototype',
+                      ),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => _savedData(context),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              const SectionHeader('Support'),
+              const SizedBox(height: 12),
+              Card(
+                child: Column(
+                  children: [
                     ListTile(
                       leading: const Icon(Icons.help_outline_rounded),
                       title: const Text('Help and Instructions'),
@@ -286,7 +410,15 @@ class SettingsScreen extends StatelessWidget {
                         ),
                       ),
                     ),
-                    const Divider(height: 1, indent: 16, endIndent: 16),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              const SectionHeader('Account actions'),
+              const SizedBox(height: 12),
+              Card(
+                child: Column(
+                  children: [
                     ListTile(
                       leading: const Icon(
                         Icons.restart_alt_rounded,
@@ -321,6 +453,38 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
+class _PreferenceSwitch extends StatelessWidget {
+  const _PreferenceSwitch({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SwitchListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+      secondary: Icon(
+        icon,
+        color: value ? accentTeal : const Color(0xFF7A8798),
+      ),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+      subtitle: Text(subtitle),
+      value: value,
+      onChanged: onChanged,
+    );
+  }
+}
+
 class _DialogPoint extends StatelessWidget {
   const _DialogPoint(this.text);
   final String text;
@@ -333,7 +497,12 @@ class _DialogPoint extends StatelessWidget {
         children: [
           const Icon(Icons.check_circle_rounded, color: successGreen, size: 20),
           const SizedBox(width: 10),
-          Text(text),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(fontSize: 13, height: 1.3),
+            ),
+          ),
         ],
       ),
     );

@@ -122,44 +122,61 @@ class MetricCard extends StatelessWidget {
     required this.label,
     required this.value,
     this.color = primaryBlue,
+    this.onTap,
   });
 
   final IconData icon;
   final String label;
   final String value;
   final Color color;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(9),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: .1),
-                borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(9),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: .1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(icon, color: color, size: 22),
+                  ),
+                  const Spacer(),
+                  if (onTap != null)
+                    const Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      color: Color(0xFF9AA8B8),
+                      size: 13,
+                    ),
+                ],
               ),
-              child: Icon(icon, color: color, size: 22),
-            ),
-            const SizedBox(height: 14),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Text(
-                value,
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  color: navy,
+              const SizedBox(height: 14),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  value,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: navy,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 3),
-            Text(label, style: const TextStyle(color: Color(0xFF617085))),
-          ],
+              const SizedBox(height: 3),
+              Text(label, style: const TextStyle(color: Color(0xFF617085))),
+            ],
+          ),
         ),
       ),
     );
@@ -224,12 +241,14 @@ class StatusCard extends StatelessWidget {
     required this.title,
     required this.status,
     this.isChecking = false,
+    this.isPending = false,
   });
 
   final IconData icon;
   final String title;
   final String status;
   final bool isChecking;
+  final bool isPending;
 
   @override
   Widget build(BuildContext context) {
@@ -253,6 +272,12 @@ class StatusCard extends StatelessWidget {
                   height: 20,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
+              else if (isPending)
+                const Icon(
+                  Icons.more_horiz_rounded,
+                  color: Color(0xFF94A3B8),
+                  size: 20,
+                )
               else
                 const Icon(
                   Icons.check_circle_rounded,
@@ -263,8 +288,8 @@ class StatusCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   status,
-                  style: const TextStyle(
-                    color: successGreen,
+                  style: TextStyle(
+                    color: isPending ? const Color(0xFF94A3B8) : successGreen,
                     fontWeight: FontWeight.w700,
                   ),
                   overflow: TextOverflow.ellipsis,
@@ -443,10 +468,33 @@ class ProgressChart extends StatelessWidget {
   Widget build(BuildContext context) {
     return Semantics(
       label: 'Progress chart showing recent performance scores',
-      child: SizedBox(
-        height: 190,
-        width: double.infinity,
-        child: CustomPaint(painter: _ProgressChartPainter(sessions)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(left: 34),
+            child: Text(
+              'Overall score',
+              style: TextStyle(
+                color: navy,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          SizedBox(
+            height: 210,
+            width: double.infinity,
+            child: CustomPaint(painter: _ProgressChartPainter(sessions)),
+          ),
+          const Padding(
+            padding: EdgeInsets.only(left: 34, top: 4, bottom: 4),
+            child: Text(
+              'Based on your saved rehearsal scores.',
+              style: TextStyle(color: Color(0xFF617085), fontSize: 11),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -458,15 +506,36 @@ class _ProgressChartPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    const plotLeft = 35.0;
+    const plotRight = 10.0;
+    const plotTop = 20.0;
+    const plotBottom = 35.0;
+    final plotHeight = size.height - plotTop - plotBottom;
+    final plotWidth = size.width - plotLeft - plotRight;
     final gridPaint = Paint()
       ..color = const Color(0xFFE4EAF2)
       ..strokeWidth = 1;
-    for (var i = 0; i < 4; i++) {
-      final y = 16 + (size.height - 36) * i / 3;
-      canvas.drawLine(Offset(10, y), Offset(size.width - 10, y), gridPaint);
+    const scoreScale = [100, 80, 60, 40];
+    for (var i = 0; i < scoreScale.length; i++) {
+      final y = plotTop + plotHeight * i / (scoreScale.length - 1);
+      canvas.drawLine(
+        Offset(plotLeft, y),
+        Offset(size.width - plotRight, y),
+        gridPaint,
+      );
+      _paintText(
+        canvas,
+        '${scoreScale[i]}',
+        Offset(plotLeft - 7, y),
+        const TextStyle(color: Color(0xFF7A8798), fontSize: 10),
+        alignRight: true,
+        centerVertically: true,
+      );
     }
 
-    final values = sessions.take(6).toList().reversed.toList();
+    final values = [...sessions]
+      ..sort((a, b) => a.dateTime.compareTo(b.dateTime));
+    if (values.length > 6) values.removeRange(0, values.length - 6);
     if (values.isEmpty) return;
     final path = Path();
     final pointPaint = Paint()..color = accentTeal;
@@ -489,10 +558,10 @@ class _ProgressChartPainter extends CustomPainter {
     final points = <Offset>[];
     for (var i = 0; i < values.length; i++) {
       final x = values.length == 1
-          ? size.width / 2
-          : 14 + (size.width - 28) * i / (values.length - 1);
+          ? plotLeft + plotWidth / 2
+          : plotLeft + plotWidth * i / (values.length - 1);
       final normalized = (values[i].overallScore.clamp(40, 100) - 40) / 60;
-      final y = size.height - 20 - normalized * (size.height - 42);
+      final y = plotTop + plotHeight - normalized * plotHeight;
       points.add(Offset(x, y));
     }
     path.moveTo(points.first.dx, points.first.dy);
@@ -500,15 +569,74 @@ class _ProgressChartPainter extends CustomPainter {
       path.lineTo(point.dx, point.dy);
     }
     final fillPath = Path.from(path)
-      ..lineTo(points.last.dx, size.height - 15)
-      ..lineTo(points.first.dx, size.height - 15)
+      ..lineTo(points.last.dx, plotTop + plotHeight)
+      ..lineTo(points.first.dx, plotTop + plotHeight)
       ..close();
     canvas.drawPath(fillPath, fillPaint);
     canvas.drawPath(path, linePaint);
-    for (final point in points) {
+    for (var index = 0; index < points.length; index++) {
+      final point = points[index];
       canvas.drawCircle(point, 6, Paint()..color = Colors.white);
       canvas.drawCircle(point, 4, pointPaint);
+      _paintText(
+        canvas,
+        '${values[index].overallScore}',
+        Offset(point.dx, point.dy - 10),
+        const TextStyle(
+          color: primaryBlue,
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+        ),
+        centerHorizontally: true,
+        alignBottom: true,
+      );
+      const months = [
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
+      ];
+      final date = values[index].dateTime;
+      _paintText(
+        canvas,
+        '${months[date.month - 1]} ${date.day}',
+        Offset(point.dx, size.height - 18),
+        const TextStyle(color: Color(0xFF617085), fontSize: 9),
+        centerHorizontally: true,
+        centerVertically: true,
+      );
     }
+  }
+
+  void _paintText(
+    Canvas canvas,
+    String text,
+    Offset anchor,
+    TextStyle style, {
+    bool alignRight = false,
+    bool centerHorizontally = false,
+    bool centerVertically = false,
+    bool alignBottom = false,
+  }) {
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    var dx = anchor.dx;
+    var dy = anchor.dy;
+    if (alignRight) dx -= painter.width;
+    if (centerHorizontally) dx -= painter.width / 2;
+    if (centerVertically) dy -= painter.height / 2;
+    if (alignBottom) dy -= painter.height;
+    painter.paint(canvas, Offset(dx, dy));
   }
 
   @override

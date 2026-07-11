@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/app_theme.dart';
+import '../models/practice_session.dart';
 import '../state/app_state.dart';
 import '../widgets/common_widgets.dart';
 import 'practice_flow.dart';
@@ -13,7 +14,22 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = AppStateScope.of(context);
-    final latest = state.sessions.isEmpty ? null : state.sessions.first;
+    final sessions = [...state.sessions]
+      ..sort((a, b) => b.dateTime.compareTo(a.dateTime));
+    final latest = sessions.isEmpty ? null : sessions.first;
+    final previous = sessions.length > 1 ? sessions[1] : null;
+    final improvement = latest != null && previous != null
+        ? latest.overallScore - previous.overallScore
+        : null;
+    final latestWeekSessions = latest == null
+        ? 0
+        : sessions
+              .where(
+                (session) =>
+                    latest.dateTime.difference(session.dateTime).inDays <= 6,
+              )
+              .length
+              .clamp(0, 3);
     return SafeArea(
       child: CustomScrollView(
         slivers: [
@@ -53,6 +69,7 @@ class HomeScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 22),
                   Container(
+                    width: double.infinity,
                     padding: const EdgeInsets.all(22),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(24),
@@ -108,38 +125,62 @@ class HomeScreen extends StatelessWidget {
                     mainAxisSpacing: 12,
                     crossAxisSpacing: 12,
                     childAspectRatio: 1.18,
-                    children: const [
+                    children: [
                       MetricCard(
                         icon: Icons.workspace_premium_outlined,
                         label: 'Latest score',
-                        value: '82/100',
+                        value: latest == null
+                            ? '—'
+                            : '${latest.overallScore}/100',
                         color: successGreen,
+                        onTap: latest == null
+                            ? onViewProgress
+                            : () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) =>
+                                      SessionDetailsScreen(session: latest),
+                                ),
+                              ),
                       ),
                       MetricCard(
                         icon: Icons.replay_rounded,
                         label: 'Total sessions',
-                        value: '6',
+                        value: '${sessions.length}',
+                        onTap: onViewProgress,
                       ),
                       MetricCard(
                         icon: Icons.schedule_rounded,
                         label: 'Practice time',
-                        value: '34 min',
+                        value: '${state.totalPracticeTime.inMinutes} min',
                         color: accentTeal,
+                        onTap: onViewProgress,
                       ),
                       MetricCard(
-                        icon: Icons.chat_bubble_outline_rounded,
-                        label: 'Most used filler',
-                        value: 'Kuan',
-                        color: warningOrange,
+                        icon: improvement != null && improvement >= 0
+                            ? Icons.trending_up_rounded
+                            : Icons.trending_down_rounded,
+                        label: 'Latest improvement',
+                        value: improvement == null
+                            ? '—'
+                            : '${improvement >= 0 ? '+' : ''}$improvement pts',
+                        color: improvement != null && improvement < 0
+                            ? warningOrange
+                            : successGreen,
+                        onTap: onViewProgress,
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 22),
+                  _WeeklyGoalCard(
+                    completed: latestWeekSessions,
+                    onTap: () => _showWeeklyGoalInfo(context),
                   ),
                   const SizedBox(height: 28),
                   SectionHeader(
                     'Recent session',
                     trailing: TextButton(
                       onPressed: onViewProgress,
-                      child: const Text('View Progress'),
+                      child: const Text('View Progress →'),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -159,26 +200,153 @@ class HomeScreen extends StatelessWidget {
                       message: 'Start a practice session to see results here.',
                     ),
                   const SizedBox(height: 18),
-                  const InfoBanner(
+                  InfoBanner(
                     icon: Icons.lightbulb_outline_rounded,
                     title: 'Coaching tip',
-                    message:
-                        'A calm pause sounds more confident than a filler word. Give your ideas room to land.',
+                    message: _coachingTip(latest),
                     color: warningOrange,
-                  ),
-                  const SizedBox(height: 12),
-                  const InfoBanner(
-                    icon: Icons.privacy_tip_outlined,
-                    title: 'Your privacy matters',
-                    message:
-                        'This prototype never records or uploads real audio or video.',
-                    color: accentTeal,
                   ),
                 ],
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+String _coachingTip(PracticeSession? session) {
+  if (session == null) {
+    return 'Complete a rehearsal to receive a personalized coaching tip.';
+  }
+  final areas = <({int score, String tip})>[
+    (
+      score: session.fillerScore,
+      tip: 'A calm pause sounds more confident than a filler word.',
+    ),
+    (
+      score: session.paceScore,
+      tip: 'Slow down around important ideas and let them settle.',
+    ),
+    (
+      score: session.postureScore,
+      tip: 'Relax your shoulders and keep a steady, confident stance.',
+    ),
+    (
+      score: session.attentionScore,
+      tip: 'Look toward the camera more often to strengthen connection.',
+    ),
+  ]..sort((a, b) => a.score.compareTo(b.score));
+  return areas.first.tip;
+}
+
+void _showWeeklyGoalInfo(BuildContext context) {
+  showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      icon: const Icon(Icons.flag_outlined, color: accentTeal),
+      title: const Text('Weekly practice goal'),
+      content: const Text(
+        'Complete three rehearsals within a seven-day practice window. '
+        'Each saved rehearsal adds to your progress and helps you build a consistent speaking habit.',
+      ),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Got it'),
+        ),
+      ],
+    ),
+  );
+}
+
+class _WeeklyGoalCard extends StatelessWidget {
+  const _WeeklyGoalCard({required this.completed, required this.onTap});
+
+  final int completed;
+  final VoidCallback onTap;
+  static const int target = 3;
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = completed / target;
+    return Material(
+      color: accentTeal.withValues(alpha: .08),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: accentTeal.withValues(alpha: .24)),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: accentTeal.withValues(alpha: .12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.flag_outlined,
+                      color: accentTeal,
+                      size: 21,
+                    ),
+                  ),
+                  const SizedBox(width: 11),
+                  const Expanded(
+                    child: Text(
+                      'Weekly practice goal',
+                      style: TextStyle(
+                        color: navy,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '$completed/$target',
+                    style: const TextStyle(
+                      color: accentTeal,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  const Icon(
+                    Icons.info_outline_rounded,
+                    color: accentTeal,
+                    size: 18,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(5),
+                child: LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 7,
+                  color: accentTeal,
+                  backgroundColor: accentTeal.withValues(alpha: .13),
+                ),
+              ),
+              const SizedBox(height: 7),
+              Text(
+                completed >= target
+                    ? 'Goal completed — keep your momentum going!'
+                    : '${target - completed} more rehearsal${target - completed == 1 ? '' : 's'} to reach your goal.',
+                style: const TextStyle(color: Color(0xFF617085), fontSize: 12),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
