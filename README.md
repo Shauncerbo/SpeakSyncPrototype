@@ -4,9 +4,13 @@ SpeakSync is a mobile-first speech and body-language rehearsal prototype for Sen
 
 ## Prototype scope
 
-This version is a front-end prototype only. AI analysis, backend services, APIs, authentication, and database integration are simulated or not yet implemented.
+This version remains an AI-analysis prototype. It uses the real device camera
+preview, while speech, posture, pace, filler-word, transcript, and
+camera-attention results remain simulated.
 
-The application does not access a real camera or microphone, record audio or video, upload content, connect to a backend, or require an internet connection. All practice results and history changes use local dummy data and remain in memory only while the app is open.
+Completed reports, rehearsal metadata, filler logs, speech profiles, demo-user
+data, and settings are persisted locally with Hive. The application does not
+connect to a production backend or upload rehearsal content.
 
 ## Technologies
 
@@ -22,21 +26,20 @@ The application does not access a real camera or microphone, record audio or vid
 - Timed splash and three-page onboarding
 - Home dashboard with practice summaries, coaching, and privacy reminders
 - Validated practice setup with speech, language, duration, and monitoring options
-- Simulated camera, microphone, lighting, framing, and internet checks
-- Rehearsal timer with pause, resume, and safe disposal
-- Simulated camera preview and microphone activity
+- Simulated camera, microphone, and internet readiness checks
+- Target-duration countdown with a 30-second warning and automatic completion
+- Real front-camera preview with camera and microphone controls
 - Demo controls for Kuan, Ano, poor posture, looking away, fast pace, and good performance
 - Auto-hiding, non-flashing feedback alerts
 - Dynamic simulated scoring and performance reports
-- In-memory report saving with duplicate prevention
-- Progress metrics, custom trend chart, session history, and session details
-- Practice preferences, privacy details, help, about, and prototype data reset
+- Hive report saving with duplicate prevention and integrity validation
+- Persisted progress metrics, ranking, trend chart, history, and details
+- Monitoring preferences, privacy details, help, about, and prototype data reset
 - Responsive scrolling layouts designed for 360–430 logical pixel mobile widths
 - Android and web project targets
 
 ## Simulated features
 
-- Camera preview and upper-body visibility
 - Microphone activity
 - Speech processing and filler-word detection
 - Pace, posture, and camera-attention analysis
@@ -55,8 +58,12 @@ lib/
     dummy_data.dart
   models/
     app_preferences.dart
+    filler_word_log.dart
+    performance_report.dart
     practice_session.dart
     practice_settings.dart
+    rehearsal_session.dart
+    speech_profile.dart
   screens/
     home_screen.dart
     main_shell.dart
@@ -66,9 +73,13 @@ lib/
     splash_onboarding.dart
   state/
     app_state.dart
+  storage/
+    hive_box_names.dart
+    hive_repository.dart
   widgets/
     common_widgets.dart
 test/
+  hive_repository_test.dart
   widget_test.dart
 ```
 

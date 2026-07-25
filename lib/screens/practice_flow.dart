@@ -25,6 +25,7 @@ class PracticeSetupScreen extends StatefulWidget {
 class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
+  final _speechContentController = TextEditingController();
   String? _speechType;
   String? _languageMode;
   String? _duration;
@@ -71,6 +72,7 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
   @override
   void dispose() {
     _titleController.dispose();
+    _speechContentController.dispose();
     super.dispose();
   }
 
@@ -78,6 +80,9 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
     if (!_formKey.currentState!.validate()) return;
     final settings = PracticeSettings(
       speechTitle: _titleController.text.trim(),
+      speechContent: _speechContentController.text.trim().isEmpty
+          ? null
+          : _speechContentController.text.trim(),
       speechType: _speechType!,
       languageMode: _languageMode!,
       selectedDuration: _duration!,
@@ -138,6 +143,26 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                       }
                       return null;
                     },
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    key: const Key('speech_content'),
+                    controller: _speechContentController,
+                    minLines: 3,
+                    maxLines: 6,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: const InputDecoration(
+                      labelText: 'Speech content (optional)',
+                      hintText:
+                          'Paste or type your prepared speech script here',
+                      helperText:
+                          'Saved with the speech profile for future reference',
+                      alignLabelWithHint: true,
+                      prefixIcon: Padding(
+                        padding: EdgeInsets.only(bottom: 40),
+                        child: Icon(Icons.description_outlined),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 16),
                   _DropdownField(
@@ -328,7 +353,7 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
       _activeCheck = 0;
     });
     final stepDuration = AppTimingScope.of(context).deviceCheckDuration;
-    for (var index = 0; index < 5; index++) {
+    for (var index = 0; index < 3; index++) {
       if (!mounted) return;
       setState(() => _activeCheck = index);
       await Future<void>.delayed(stepDuration);
@@ -404,27 +429,11 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
                 ),
                 const SizedBox(height: 10),
                 StatusCard(
-                  icon: Icons.light_mode_outlined,
-                  title: 'Lighting',
-                  status: _checkStatus(2, 'Good'),
-                  isChecking: _checking && _activeCheck == 2,
-                  isPending: _checking && _activeCheck < 2,
-                ),
-                const SizedBox(height: 10),
-                StatusCard(
-                  icon: Icons.person_outline_rounded,
-                  title: 'Upper Body',
-                  status: _checkStatus(3, 'Visible'),
-                  isChecking: _checking && _activeCheck == 3,
-                  isPending: _checking && _activeCheck < 3,
-                ),
-                const SizedBox(height: 10),
-                StatusCard(
                   icon: Icons.cloud_done_outlined,
                   title: 'Internet for Speech Processing',
-                  status: _checkStatus(4, 'Available'),
-                  isChecking: _checking && _activeCheck == 4,
-                  isPending: _checking && _activeCheck < 4,
+                  status: _checkStatus(2, 'Available'),
+                  isChecking: _checking && _activeCheck == 2,
+                  isPending: _checking && _activeCheck < 2,
                 ),
                 const SizedBox(height: 24),
                 const SectionHeader('Before you begin'),
@@ -541,13 +550,15 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   Timer? _timer;
   Timer? _alertTimer;
   int _elapsedSeconds = 0;
+  int? _targetDurationSeconds;
+  bool _targetDurationLoaded = false;
+  bool _thirtySecondWarningShown = false;
   bool _paused = false;
   bool _recording = false;
   bool _cameraReady = false;
   bool _microphoneEnabled = true;
   bool _cameraEnabled = true;
   CameraController? _cameraController;
-  XFile? _recordedVideo;
   String _cameraStatus = 'Waiting for camera permission...';
   bool _ending = false;
   String _pace = 'Normal';
@@ -577,15 +588,60 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   @override
   void initState() {
     super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted && !_paused) {
-        setState(() {
-          _elapsedSeconds++;
-          if (_recording) _maybeAddTranscriptLine();
-        });
-      }
-    });
+    _timer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => _handleTimerTick(),
+    );
     _prepareCamera();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_targetDurationLoaded) return;
+    final selectedDuration = AppStateScope.of(
+      context,
+      listen: false,
+    ).currentSetup?.selectedDuration;
+    _targetDurationSeconds = _parseTargetDuration(selectedDuration);
+    _targetDurationLoaded = true;
+  }
+
+  int get _remainingSeconds {
+    final target = _targetDurationSeconds;
+    if (target == null) return _elapsedSeconds;
+    return (target - _elapsedSeconds).clamp(0, target);
+  }
+
+  void _handleTimerTick() {
+    if (!mounted || _paused || _ending) return;
+    final target = _targetDurationSeconds;
+    setState(() {
+      _elapsedSeconds++;
+      if (_recording) _maybeAddTranscriptLine();
+    });
+
+    if (target == null) return;
+    final remaining = _remainingSeconds;
+    if (remaining == 30 && !_thirtySecondWarningShown) {
+      _thirtySecondWarningShown = true;
+      _showAlert(
+        '30 seconds remaining — your rehearsal is almost done',
+        warningOrange,
+        icon: Icons.timer_outlined,
+      );
+    }
+    if (remaining == 0) {
+      _finishRehearsal();
+    }
+  }
+
+  int? _parseTargetDuration(String? selectedDuration) {
+    if (selectedDuration == null || selectedDuration == 'No fixed duration') {
+      return null;
+    }
+    final minutes = int.tryParse(selectedDuration.split(' ').first);
+    return minutes == null ? null : minutes * 60;
   }
 
   void _showAlert(
@@ -690,7 +746,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
         _cameraStatus = 'Camera ready';
       });
     } catch (e) {
-      print('Camera initialization error: $e');
+      debugPrint('Camera initialization error: $e');
       setState(() {
         _cameraReady = false;
         _cameraStatus = 'Unable to initialize camera. Error: $e';
@@ -698,6 +754,9 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     }
   }
 
+  // Reserved for the future recording control. The current UI intentionally
+  // exposes only camera and microphone on/off controls.
+  // ignore: unused_element
   Future<void> _toggleRecording() async {
     if (!_cameraReady || _cameraController == null) {
       await _prepareCamera();
@@ -721,7 +780,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       }
     } else {
       try {
-        _recordedVideo = await _cameraController!.stopVideoRecording();
+        await _cameraController!.stopVideoRecording();
         _showAlert('Recording saved locally.', successGreen);
       } catch (_) {
         _showAlert('Failed to stop recording.', errorRed);
@@ -802,6 +861,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
 
   Future<void> _confirmEnd() async {
     if (_ending) return;
+    setState(() => _paused = true);
     final shouldEnd = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -821,7 +881,18 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
         ],
       ),
     );
-    if (shouldEnd != true || !mounted) return;
+    if (!mounted) return;
+    if (shouldEnd != true) {
+      setState(() => _paused = false);
+      return;
+    }
+    await _finishRehearsal();
+  }
+
+  Future<void> _finishRehearsal() async {
+    if (_ending) return;
+    _ending = true;
+    _timer?.cancel();
     if (_recording && _cameraController != null) {
       try {
         await _cameraController!.stopVideoRecording();
@@ -829,8 +900,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
         // Ignore stop errors during cleanup.
       }
     }
-    _ending = true;
-    _timer?.cancel();
+    if (!mounted) return;
     final state = AppStateScope.of(context, listen: false);
     final setup = state.currentSetup!;
     final overall = _calculateOverall();
@@ -912,8 +982,9 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   @override
   Widget build(BuildContext context) {
     final setup = AppStateScope.of(context).currentSetup!;
-    final minutes = (_elapsedSeconds ~/ 60).toString().padLeft(2, '0');
-    final seconds = (_elapsedSeconds % 60).toString().padLeft(2, '0');
+    final displayedSeconds = _remainingSeconds;
+    final minutes = (displayedSeconds ~/ 60).toString().padLeft(2, '0');
+    final seconds = (displayedSeconds % 60).toString().padLeft(2, '0');
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
@@ -989,6 +1060,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                               duration: const Duration(milliseconds: 180),
                               child: Container(
                                 key: ValueKey(_alert),
+                                width: double.infinity,
                                 constraints: const BoxConstraints(
                                   maxWidth: 360,
                                 ),
@@ -1022,8 +1094,9 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                                     Flexible(
                                       child: Text(
                                         _alert!,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
+                                        maxLines: 2,
+                                        softWrap: true,
+                                        overflow: TextOverflow.visible,
                                         style: const TextStyle(
                                           color: Colors.white,
                                           fontSize: 12,
@@ -1217,6 +1290,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                                 _posture = 'Good';
                                 _attention = 82;
                                 _paused = false;
+                                _thirtySecondWarningShown = false;
                                 _alert = null;
                               });
                             }
@@ -1886,28 +1960,46 @@ class ReportScreen extends StatefulWidget {
 
 class _ReportScreenState extends State<ReportScreen> {
   bool _saved = false;
+  bool _saving = false;
 
-  void _saveOrView() {
+  Future<void> _saveOrView() async {
     if (_saved) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute<void>(
-          builder: (_) => const MainShell(initialIndex: 2),
+          builder: (_) => const MainShell(initialIndex: 1),
         ),
         (route) => false,
       );
       return;
     }
-    final saved = AppStateScope.of(context, listen: false).saveCurrentReport();
-    setState(() => _saved = saved || _saved);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          saved
-              ? 'Session saved to Progress.'
-              : 'This session is already in Progress.',
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      final saved = await AppStateScope.of(
+        context,
+        listen: false,
+      ).saveCurrentReport();
+      if (!mounted) return;
+      setState(() {
+        _saved = true;
+        _saving = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            saved
+                ? 'Session saved to Progress.'
+                : 'This session is already in Progress.',
+          ),
         ),
-      ),
-    );
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to save this session: $error')),
+      );
+    }
   }
 
   @override
@@ -2136,13 +2228,19 @@ class _ReportScreenState extends State<ReportScreen> {
                 const SizedBox(height: 16),
                 FilledButton.icon(
                   key: const Key('save_progress'),
-                  onPressed: _saveOrView,
+                  onPressed: _saving ? null : _saveOrView,
                   icon: Icon(
                     _saved
                         ? Icons.insights_rounded
                         : Icons.bookmark_add_outlined,
                   ),
-                  label: Text(_saved ? 'View Progress' : 'Save to Progress'),
+                  label: Text(
+                    _saving
+                        ? 'Saving...'
+                        : _saved
+                        ? 'View Progress'
+                        : 'Save to Progress',
+                  ),
                   style: FilledButton.styleFrom(
                     minimumSize: const Size(double.infinity, 54),
                   ),

@@ -19,9 +19,6 @@ class User extends HiveObject {
   @HiveField(4)
   String email;
 
-  @HiveField(5)
-  String password;
-
   @HiveField(6)
   String? schoolName;
 
@@ -34,7 +31,6 @@ class User extends HiveObject {
     this.middleName,
     required this.lastName,
     required this.email,
-    required this.password,
     this.schoolName,
     required this.createdAt,
   });

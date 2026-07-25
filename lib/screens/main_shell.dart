@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../core/app_theme.dart';
+import '../state/app_state.dart';
 import 'home_screen.dart';
+import 'practice_flow.dart';
 import 'progress_screens.dart';
 import 'settings_screens.dart';
 
@@ -18,7 +21,7 @@ class _MainShellState extends State<MainShell> {
   @override
   void initState() {
     super.initState();
-    _index = 0; // Default to Home
+    _index = widget.initialIndex.clamp(0, 2);
   }
 
   void _select(int value) {
@@ -27,6 +30,7 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
+    final state = AppStateScope.of(context);
     final pages = <Widget>[
       HomeScreen(onViewProgress: () => setState(() => _index = 1)),
       const ProgressScreen(),
@@ -34,7 +38,42 @@ class _MainShellState extends State<MainShell> {
     ];
 
     return Scaffold(
-      body: IndexedStack(index: _index, children: pages),
+      body: state.isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                if (state.storageError != null)
+                  MaterialBanner(
+                    content: Text(
+                      'Some saved data could not be loaded. '
+                      '${state.storageError}',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: state.clearStorageError,
+                        child: const Text('Dismiss'),
+                      ),
+                    ],
+                  ),
+                Expanded(
+                  child: IndexedStack(index: _index, children: pages),
+                ),
+              ],
+            ),
+      floatingActionButton: !state.isLoading && _index == 0
+          ? FloatingActionButton(
+              key: const Key('quick_start_practice'),
+              tooltip: 'Start Practice',
+              backgroundColor: const Color(0xFF48DCEB),
+              foregroundColor: navy,
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const PracticeSetupScreen(),
+                ),
+              ),
+              child: const Icon(Icons.mic_rounded),
+            )
+          : null,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: _select,

@@ -32,11 +32,11 @@ class SpeakSyncApp extends StatelessWidget {
           title: 'SpeakSync',
           debugShowCheckedModeBanner: false,
           theme: buildAppTheme(),
-          
-          home: const SplashScreen(), 
+
+          home: const SplashScreen(),
 
           routes: {
-            '/home': (context) => const MainShell(), 
+            '/home': (context) => const MainShell(),
             '/register': (context) => const RegisterScreen(),
           },
         ),

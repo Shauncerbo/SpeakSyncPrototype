@@ -26,6 +26,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('onboarding_skip')));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Sign In'));
+    await tester.pumpAndSettle();
     return state;
   }
 
@@ -34,20 +36,40 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> enterValidSetup(WidgetTester tester) async {
+  Future<void> enterValidSetup(
+    WidgetTester tester, {
+    String duration = '3 minutes',
+  }) async {
     await tester.enterText(
       find.byKey(const Key('speech_title')),
       'Environmental Awareness Speech',
     );
+    await tester.tap(find.byKey(const Key('speech_type')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Prepared').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('language_mode')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Mixed Language').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('duration')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(duration).last);
+    await tester.pumpAndSettle();
     await tester.ensureVisible(find.byKey(const Key('setup_continue')));
     await tester.tap(find.byKey(const Key('setup_continue')));
     await tester.pumpAndSettle();
   }
 
   Future<void> openRehearsal(WidgetTester tester) async {
-    await tester.ensureVisible(find.byKey(const Key('start_rehearsal')));
-    await tester.tap(find.byKey(const Key('start_rehearsal')));
-    await tester.pumpAndSettle();
+    final startButton = find.byKey(const Key('start_rehearsal'));
+    await tester.ensureVisible(startButton);
+    await tester.pump();
+    expect(tester.widget<FilledButton>(startButton).onPressed, isNotNull);
+    await tester.tap(startButton);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Rehearsal'), findsOneWidget);
   }
 
   testWidgets('1. Splash loads', (tester) async {
@@ -77,6 +99,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('get_started')));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Sign In'));
+    await tester.pumpAndSettle();
 
     expect(find.text('Hello, Speaker!'), findsOneWidget);
   });
@@ -84,10 +108,13 @@ void main() {
   testWidgets('3. Start Practice opens setup', (tester) async {
     await setPhoneSize(tester);
     await openHome(tester);
-    await openSetup(tester);
+    expect(find.byKey(const Key('quick_start_practice')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('quick_start_practice')));
+    await tester.pumpAndSettle();
 
     expect(find.text('Practice Setup'), findsOneWidget);
     expect(find.byKey(const Key('speech_title')), findsOneWidget);
+    expect(find.byKey(const Key('speech_content')), findsOneWidget);
   });
 
   testWidgets('4. Empty title shows validation', (tester) async {
@@ -111,6 +138,8 @@ void main() {
     expect(find.text('Device Check'), findsOneWidget);
     expect(find.text('Camera'), findsOneWidget);
     expect(find.text('Microphone'), findsOneWidget);
+    expect(find.text('Lighting'), findsNothing);
+    expect(find.text('Upper Body'), findsNothing);
   });
 
   testWidgets('6. Rehearsal loads', (tester) async {
@@ -151,15 +180,44 @@ void main() {
 
     await tester.ensureVisible(find.byKey(const Key('end_session')));
     await tester.tap(find.byKey(const Key('end_session')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
     await tester.tap(find.byKey(const Key('confirm_end_session')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
 
     expect(find.text('Performance Report'), findsOneWidget);
     expect(find.text('Environmental Awareness Speech'), findsOneWidget);
   });
 
-  testWidgets('9. Saving adds a progress entry', (tester) async {
+  testWidgets('9. Fixed duration warns and ends automatically', (tester) async {
+    await setPhoneSize(tester);
+    final state = await openHome(tester);
+    await openSetup(tester);
+    await enterValidSetup(tester, duration: '1 minute');
+    await openRehearsal(tester);
+
+    expect(find.text('01:00'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 30));
+    expect(find.text('00:30'), findsOneWidget);
+    expect(
+      find.text('30 seconds remaining — your rehearsal is almost done'),
+      findsOneWidget,
+    );
+
+    await tester.pump(const Duration(seconds: 30));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.text('Performance Report'), findsOneWidget);
+    expect(state.currentReport?.duration, const Duration(minutes: 1));
+  });
+
+  testWidgets('10. Saving adds a progress entry', (tester) async {
     await setPhoneSize(tester);
     final state = AppState();
     final initialCount = state.sessions.length;
@@ -200,13 +258,16 @@ void main() {
     expect(find.text('Session saved to Progress.'), findsOneWidget);
   });
 
-  testWidgets('10. Settings switches update state', (tester) async {
+  testWidgets('11. Settings switches update state', (tester) async {
     await setPhoneSize(tester);
     final state = await openHome(tester);
 
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
     expect(state.preferences.liveFeedback, isTrue);
+    expect(find.text('Practice preferences'), findsNothing);
+    expect(find.text('Default language'), findsNothing);
+    expect(find.text('Default duration'), findsNothing);
 
     await tester.ensureVisible(find.byKey(const Key('settings_live_feedback')));
     await tester.tap(find.byKey(const Key('settings_live_feedback')));

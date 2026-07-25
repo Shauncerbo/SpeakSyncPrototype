@@ -1,9 +1,14 @@
+import 'package:hive/hive.dart';
+
+part 'app_preferences.g.dart';
+
+@HiveType(typeId: 1)
 class AppPreferences {
   const AppPreferences({
+    required this.userId,
     required this.defaultLanguage,
     required this.defaultDuration,
     required this.liveFeedback,
-    required this.vibrationFeedback,
     required this.bodyMonitoring,
     required this.cameraAttentionMonitoring,
     required this.fillerMonitoring,
@@ -11,21 +16,38 @@ class AppPreferences {
     required this.alertFrequency,
   });
 
+  @HiveField(0)
+  final String userId;
+
+  @HiveField(1)
   final String defaultLanguage;
+
+  @HiveField(2)
   final String defaultDuration;
+
+  @HiveField(3)
   final bool liveFeedback;
-  final bool vibrationFeedback;
+
+  @HiveField(4)
   final bool bodyMonitoring;
+
+  @HiveField(5)
   final bool cameraAttentionMonitoring;
+
+  @HiveField(6)
   final bool fillerMonitoring;
+
+  @HiveField(7)
   final bool paceMonitoring;
+
+  @HiveField(8)
   final String alertFrequency;
 
   AppPreferences copyWith({
+    String? userId,
     String? defaultLanguage,
     String? defaultDuration,
     bool? liveFeedback,
-    bool? vibrationFeedback,
     bool? bodyMonitoring,
     bool? cameraAttentionMonitoring,
     bool? fillerMonitoring,
@@ -33,10 +55,10 @@ class AppPreferences {
     String? alertFrequency,
   }) {
     return AppPreferences(
+      userId: userId ?? this.userId,
       defaultLanguage: defaultLanguage ?? this.defaultLanguage,
       defaultDuration: defaultDuration ?? this.defaultDuration,
       liveFeedback: liveFeedback ?? this.liveFeedback,
-      vibrationFeedback: vibrationFeedback ?? this.vibrationFeedback,
       bodyMonitoring: bodyMonitoring ?? this.bodyMonitoring,
       cameraAttentionMonitoring:
           cameraAttentionMonitoring ?? this.cameraAttentionMonitoring,

@@ -2,10 +2,10 @@ import '../models/app_preferences.dart';
 import '../models/practice_session.dart';
 
 const initialPreferences = AppPreferences(
+  userId: 'demo-user',
   defaultLanguage: 'Mixed Language',
   defaultDuration: '3 minutes',
   liveFeedback: true,
-  vibrationFeedback: false,
   bodyMonitoring: true,
   cameraAttentionMonitoring: true,
   fillerMonitoring: true,

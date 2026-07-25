@@ -1,194 +1,233 @@
 # SpeakSync Data Dictionary
 
-## 1. Document Overview
+## 1. Overview
 
-This document defines the proposed local NoSQL database structure for the
-SpeakSync mobile application. SpeakSync uses Hive boxes instead of relational
-database tables. Keys stored in related objects provide logical relationships;
-Hive does not enforce foreign-key constraints.
+SpeakSync uses Hive for local persistence. Hive boxes act as collections, and
+their keys act as primary keys. Relationships are stored as string IDs and are
+validated by `HiveRepository` because Hive does not enforce foreign keys.
 
 **Legend**
 
-- **PK** — Primary key used as the Hive record key.
-- **LR** — Logical reference to a key in another box.
-- **Required** — A value must be supplied before the record is saved.
-- **Optional** — The value may be null or omitted.
-- **Derived** — Calculated from other stored records and does not need to be
-  saved.
+- **PK:** Primary key and Hive record key
+- **LR:** Logical reference to another record
+- **Required:** Must be provided before saving
+- **Optional:** May be null
 
 ## 2. Hive Box Inventory
 
-| Box name | Proposed model | Hive key | Purpose | Status |
-|---|---|---|---|---|
-| `users` | `UserModel` | `userId` | Stores the local student profile | Partially implemented |
-| `sessions` | `PracticeSession` | `sessionId` | Stores completed rehearsal reports | Model implemented; Hive adapter pending |
-| `preferences` | `AppPreferences` | `userId` | Stores each student's application defaults | Model implemented; Hive adapter pending |
-| `goals` | `PracticeGoal` | `goalId` | Stores weekly or personal rehearsal goals | Proposed |
-| `rehearsal_events` | `RehearsalEvent` | `eventId` | Stores timestamped rehearsal alerts | Proposed |
+| Box | Model | Key | Status |
+|---|---|---|---|
+| `users` | `User` | `userId` | Implemented |
+| `appPreferences` | `AppPreferences` | `userId` | Implemented |
+| `speechProfiles` | `SpeechProfile` | `speechProfileId` | Implemented |
+| `rehearsalSessions` | `RehearsalSession` | `sessionId` | Implemented |
+| `fillerWordLogs` | `FillerWordLog` | `logId` | Implemented |
+| `performanceReports` | `PerformanceReport` | `reportId` | Implemented |
+| `applicationMetadata` | Dynamic metadata | Metadata key | Implemented |
 
-`PracticeSettings` is currently temporary setup state. It does not require a
-separate box unless unfinished rehearsal setup must be restored after the app
-is closed.
+The metadata box stores one-time flags for demo-data seeding and legacy-user
+migration.
 
-## 3. Users Box
+## 3. User
 
 **Box:** `users`  
-**Hive key:** `userId`  
-**Purpose:** Stores the profile of a Senior High School student using SpeakSync.
+**Hive type ID:** `0`
 
-| Field | Data type | Key/Reference | Requirement | Example | Description |
-|---|---|---|---|---|---|
-| `userId` | String | PK | Required | `user-001` | Unique identifier of the student |
-| `firstName` | String | — | Required | `Maria` | Student's given name |
-| `middleName` | String | — | Optional | `Santos` | Student's middle name |
-| `lastName` | String | — | Required | `Cruz` | Student's family name |
-| `email` | String | Unique | Required | `maria@school.edu.ph` | Student's sign-in or contact email |
-| `schoolName` | String | — | Optional | `Sample National High School` | Name of the student's school |
-| `createdAt` | DateTime | — | Required | `2026-07-11T09:30:00` | Date and time the profile was created |
+| Field | Type | Key/reference | Requirement |
+|---|---|---|---|
+| `userId` | String | PK | Required |
+| `firstName` | String | - | Required |
+| `middleName` | String | - | Optional |
+| `lastName` | String | - | Required |
+| `email` | String | Unique by application rule | Required |
+| `schoolName` | String | - | Optional |
+| `createdAt` | DateTime | - | Required |
 
-**Security note:** A plain-text `password` field currently exists in
-`User`. It should not be included in the final stored data design. Passwords
-should be handled by a proper authentication service, not stored directly in a
-Hive box.
+No password field is stored in this model. The previous Hive password field was
+removed, and legacy profiles are migrated without it.
 
-## 4. Sessions Box
+## 4. AppPreferences
 
-**Box:** `sessions`  
-**Hive key:** `sessionId`  
-**Purpose:** Stores the results and feedback produced by each completed
-rehearsal.
+**Box:** `appPreferences`  
+**Hive type ID:** `1`
 
-| Field | Data type | Key/Reference | Requirement | Example | Description |
-|---|---|---|---|---|---|
-| `sessionId` | String | PK | Required | `session-001` | Unique rehearsal identifier; corresponds to the current model's `id` |
-| `userId` | String | LR → `users.userId` | Required | `user-001` | Student who owns the rehearsal |
-| `title` | String | — | Required | `Climate Change Speech` | Student's speech title |
-| `speechType` | String | — | Required | `Persuasive` | Prepared, impromptu, informative, or persuasive speech |
-| `languageMode` | String | — | Required | `English–Filipino` | Language configuration used during rehearsal |
-| `dateTime` | DateTime | — | Required | `2026-06-18T14:20:00` | Date and time the rehearsal occurred |
-| `duration` | Duration | — | Required | `00:06:20` | Total rehearsal duration |
-| `overallScore` | Integer | — | Required | `82` | Combined performance score from 0 to 100 |
-| `paceScore` | Integer | — | Required | `84` | Speaking-pace score from 0 to 100 |
-| `fillerScore` | Integer | — | Required | `78` | Filler-word control score from 0 to 100 |
-| `postureScore` | Integer | — | Required | `86` | Posture score from 0 to 100 |
-| `attentionScore` | Integer | — | Required | `80` | Camera-facing attention score from 0 to 100 |
-| `fillerCounts` | Map<String, Integer> | — | Required | `{"Kuan": 3, "Ano": 1}` | Count of each detected localized filler word |
-| `coachingTips` | List<String> | — | Required | `["Use a quiet pause."]` | Post-session coaching recommendations |
-| `textTranscript` | String | — | Optional | `Good morning everyone...` | Complete rehearsal transcript |
-| `transcriptLines` | List<String> | — | Optional | `["Good morning..."]` | Transcript separated into lines or segments |
-| `recommendedPosture` | String | — | Required | `Keep your shoulders relaxed.` | Suggested posture improvement |
-| `isPrototypeData` | Boolean | — | Required | `true` | Identifies simulated prototype reports |
-| `videoPath` | String | — | Optional | `/sessions/session-001.mp4` | Proposed local path to the recorded video; the video itself is not stored in Hive |
+| Field | Type | Key/reference | Requirement |
+|---|---|---|---|
+| `userId` | String | PK and LR to `users.userId` | Required |
+| `defaultLanguage` | String | - | Required |
+| `defaultDuration` | String | - | Required |
+| `liveFeedback` | Boolean | - | Required |
+| `bodyMonitoring` | Boolean | - | Required |
+| `cameraAttentionMonitoring` | Boolean | - | Required |
+| `fillerMonitoring` | Boolean | - | Required |
+| `paceMonitoring` | Boolean | - | Required |
+| `alertFrequency` | String | - | Required |
 
-The current model includes `gestureCounts`, but the repeated-gesture feature was
-removed from the interface. The field may be removed before finalizing the Hive
-adapter if the feature is no longer part of the approved scope.
+## 5. SpeechProfile
 
-## 5. Preferences Box
+**Box:** `speechProfiles`  
+**Hive type ID:** `2`
 
-**Box:** `preferences`  
-**Hive key:** `userId`  
-**Purpose:** Stores persistent application and rehearsal defaults for one
-student.
+| Field | Type | Key/reference | Requirement |
+|---|---|---|---|
+| `speechProfileId` | String | PK | Required |
+| `userId` | String | LR to `users.userId` | Required |
+| `speechTitle` | String | - | Required |
+| `speechType` | String | - | Required |
+| `languageMode` | String | - | Required |
+| `targetDurationSeconds` | Integer | - | Required, non-negative |
+| `speechContent` | String | - | Optional |
+| `createdAt` | DateTime | - | Required |
+| `updatedAt` | DateTime | - | Required |
 
-| Field | Data type | Key/Reference | Requirement | Example | Description |
-|---|---|---|---|---|---|
-| `userId` | String | PK and LR → `users.userId` | Required | `user-001` | Owner of the preference record |
-| `defaultLanguage` | String | — | Required | `Mixed Language` | Default rehearsal language mode |
-| `defaultDuration` | String | — | Required | `3 minutes` | Default target rehearsal duration |
-| `liveFeedback` | Boolean | — | Required | `true` | Enables subtle real-time feedback alerts |
-| `vibrationFeedback` | Boolean | — | Required | `false` | Enables vibration feedback when supported |
-| `bodyMonitoring` | Boolean | — | Required | `true` | Enables posture monitoring by default |
-| `cameraAttentionMonitoring` | Boolean | — | Required | `true` | Proposed default for camera-facing attention monitoring |
-| `fillerMonitoring` | Boolean | — | Required | `true` | Enables localized filler-word monitoring by default |
-| `paceMonitoring` | Boolean | — | Required | `true` | Proposed default for speaking-pace monitoring |
-| `alertFrequency` | String | — | Required | `Balanced` | Preferred frequency of real-time coaching reminders |
+## 6. RehearsalSession
 
-## 6. Temporary Practice Settings
+**Box:** `rehearsalSessions`  
+**Hive type ID:** `3`
 
-**Storage:** In-memory application state  
-**Purpose:** Holds the student's choices between Practice Setup and the active
-rehearsal. This is not a permanent Hive box in the current design.
+This model stores rehearsal metadata and monitoring choices. Scores and
+feedback are stored separately in `PerformanceReport`.
 
-| Field | Data type | Requirement | Example | Description |
-|---|---|---|---|---|
-| `speechTitle` | String | Required | `Environmental Awareness` | Title entered for the upcoming rehearsal |
-| `speechType` | String | Required | `Prepared` | Selected speech category |
-| `languageMode` | String | Required | `Mixed Language` | Selected rehearsal language |
-| `selectedDuration` | String | Required | `3 minutes` | Selected target duration |
-| `monitorBodyLanguage` | Boolean | Required | `true` | Enables posture monitoring |
-| `monitorCameraAttention` | Boolean | Required | `true` | Enables camera-facing attention monitoring |
-| `monitorFillers` | Boolean | Required | `true` | Enables filler-word monitoring |
-| `monitorPace` | Boolean | Required | `true` | Enables speaking-pace monitoring |
-| `enableLiveFeedback` | Boolean | Required | `true` | Enables overlay alerts during rehearsal |
+| Field | Type | Key/reference | Requirement |
+|---|---|---|---|
+| `sessionId` | String | PK | Required |
+| `userId` | String | LR to `users.userId` | Required |
+| `speechProfileId` | String | LR to `speechProfiles.speechProfileId` | Required |
+| `speechTitle` | String | - | Required |
+| `speechType` | String | - | Required |
+| `languageMode` | String | - | Required |
+| `targetDurationSeconds` | Integer | - | Required, non-negative |
+| `durationSeconds` | Integer | - | Required, non-negative |
+| `sessionDate` | DateTime | - | Required |
+| `liveAlertsEnabled` | Boolean | - | Required |
+| `bodyLanguageEnabled` | Boolean | - | Required |
+| `fillerWordEnabled` | Boolean | - | Required |
+| `speakingPaceEnabled` | Boolean | - | Required |
+| `cameraAttentionEnabled` | Boolean | - | Required |
 
-## 7. Goals Box
+## 7. FillerWordLog
 
-**Box:** `goals`  
-**Hive key:** `goalId`  
-**Purpose:** Stores weekly or personal rehearsal targets shown on the Home
-screen.
+**Box:** `fillerWordLogs`  
+**Hive type ID:** `4`
 
-| Field | Data type | Key/Reference | Requirement | Example | Description |
-|---|---|---|---|---|---|
-| `goalId` | String | PK | Required | `goal-001` | Unique goal identifier |
-| `userId` | String | LR → `users.userId` | Required | `user-001` | Student who owns the goal |
-| `goalType` | String | — | Required | `weeklySessions` | Category of goal being measured |
-| `targetValue` | Integer | — | Required | `3` | Number or score the student wants to reach |
-| `startDate` | DateTime | — | Required | `2026-07-06` | Beginning of the goal period |
-| `endDate` | DateTime | — | Required | `2026-07-12` | End of the goal period |
-| `isActive` | Boolean | — | Required | `true` | Indicates whether the goal is currently active |
-| `completedValue` | Integer | — | Derived | `2` | Progress calculated from matching saved sessions |
+| Field | Type | Key/reference | Requirement |
+|---|---|---|---|
+| `logId` | String | PK | Required |
+| `sessionId` | String | LR to `rehearsalSessions.sessionId` | Required |
+| `fillerWord` | String | - | Required |
+| `occurrenceCount` | Integer | - | Required, non-negative |
+| `detectedTimes` | List<Integer> | - | Required, non-negative values |
 
-## 8. Rehearsal Events Box
+`occurrenceCount` must equal `detectedTimes.length`. Detection times are
+prototype-generated until real speech processing is implemented.
 
-**Box:** `rehearsal_events`  
-**Hive key:** `eventId`  
-**Purpose:** Stores a timeline of alerts produced during a rehearsal for later
-review.
+## 8. PerformanceReport
 
-| Field | Data type | Key/Reference | Requirement | Example | Description |
-|---|---|---|---|---|---|
-| `eventId` | String | PK | Required | `event-001` | Unique alert-event identifier |
-| `sessionId` | String | LR → `sessions.sessionId` | Required | `session-001` | Rehearsal associated with the event |
-| `eventType` | String | — | Required | `fillerWord` | `fillerWord`, `pace`, `posture`, or `attention` |
-| `message` | String | — | Required | `Filler word detected` | Alert shown to the student |
-| `timestampSeconds` | Integer | — | Required | `18` | Seconds elapsed when the alert occurred |
-| `severity` | String | — | Required | `warning` | Visual priority of the event |
-| `detectedValue` | String | — | Optional | `Kuan` | Word, pace state, or other value linked to the event |
+**Box:** `performanceReports`  
+**Hive type ID:** `5`
 
-## 9. Logical Relationships
+| Field | Type | Key/reference | Requirement |
+|---|---|---|---|
+| `reportId` | String | PK | Required |
+| `sessionId` | String | LR to `rehearsalSessions.sessionId` | Required and unique per session |
+| `totalWords` | Integer | - | Required, non-negative |
+| `wordsPerMinute` | Double | - | Required, non-negative |
+| `paceScore` | Integer | - | Required, 0-100 |
+| `fillerScore` | Integer | - | Required, 0-100 |
+| `goodPostureSeconds` | Integer | - | Required, non-negative |
+| `postureScore` | Integer | - | Required, 0-100 |
+| `cameraFacingSeconds` | Integer | - | Required, non-negative |
+| `cameraScore` | Integer | - | Required, 0-100 |
+| `overallScore` | Integer | - | Required, 0-100 |
+| `coachingTips` | List<String> | - | Required |
+| `textTranscript` | String | - | Optional |
+| `createdAt` | DateTime | - | Required |
+| `fillerCounts` | Map<String, Integer> | - | Required |
+| `recommendedPosture` | String | - | Required |
+| `isPrototypeData` | Boolean | - | Required |
+
+## 9. Temporary PracticeSettings
+
+**Storage:** In-memory application state
+
+This model remains temporary between Practice Setup and the completed
+rehearsal:
+
+| Field | Type |
+|---|---|
+| `speechTitle` | String |
+| `speechType` | String |
+| `languageMode` | String |
+| `selectedDuration` | String |
+| `monitorBodyLanguage` | Boolean |
+| `monitorCameraAttention` | Boolean |
+| `monitorFillers` | Boolean |
+| `monitorPace` | Boolean |
+| `enableLiveFeedback` | Boolean |
+
+When a completed report is saved, these choices are mapped into a
+`SpeechProfile` and `RehearsalSession`.
+
+## 10. UI Aggregate: PracticeSession
+
+`PracticeSession` remains the non-Hive view model used by the current Home,
+Progress, Ranking, Report, and Session Details screens. It is reconstructed by
+joining:
 
 ```text
-USERS
-  │
-  ├── 1 : many ── SESSIONS
-  │                   │
-  │                   └── 1 : many ── REHEARSAL_EVENTS
-  │
-  ├── 1 : 1 ───── PREFERENCES
-  │
-  └── 1 : many ── GOALS
+RehearsalSession + PerformanceReport -> PracticeSession
 ```
 
-| Parent | Child | Relationship | Logical reference |
-|---|---|---|---|
-| User | Session | One-to-many | `sessions.userId` → `users.userId` |
-| User | Preferences | One-to-one | Preferences box key → `users.userId` |
-| User | Goal | One-to-many | `goals.userId` → `users.userId` |
-| Session | Rehearsal Event | One-to-many | `rehearsal_events.sessionId` → `sessions.sessionId` |
+Filler detail is available separately through `FillerWordLog`. Keeping this
+aggregate prevents a destructive rewrite of the existing interface.
 
-## 10. Validation and Storage Rules
+## 11. Relationships
 
-1. Every Hive `typeId` must be unique across the application.
-2. Existing `HiveField` numbers must never be changed or reused after data has
-   been released.
-3. Email addresses should be normalized and validated before saving.
-4. Scores must remain within the range 0–100.
-5. Rehearsal duration and event timestamps cannot be negative.
-6. Plain-text passwords must not be stored in Hive.
-7. Audio and video files should be saved in application file storage; Hive
-   should contain only their local paths and metadata.
-8. Deleting a user should also remove their preferences, goals, sessions, and
-   related rehearsal events through application code.
-9. Prototype-generated reports must set `isPrototypeData` to `true`.
+```text
+User
+ |-- one AppPreferences
+ |-- many SpeechProfiles
+ `-- many RehearsalSessions
+          |-- one PerformanceReport
+          `-- many FillerWordLogs
+```
+
+| Parent | Child | Relationship |
+|---|---|---|
+| User | AppPreferences | One-to-one |
+| User | SpeechProfile | One-to-many |
+| User | RehearsalSession | One-to-many |
+| SpeechProfile | RehearsalSession | One-to-many |
+| RehearsalSession | PerformanceReport | One-to-one |
+| RehearsalSession | FillerWordLog | One-to-many |
+
+## 12. Integrity Rules
+
+The repository applies these rules:
+
+1. Record IDs cannot be empty and are used as unique Hive keys.
+2. Durations, word counts, and detection times cannot be negative.
+3. Scores must remain between 0 and 100.
+4. A filler log must reference an existing rehearsal session.
+5. A filler log's count must equal the number of detection times.
+6. A performance report must reference an existing rehearsal session.
+7. A rehearsal session can have no more than one performance report.
+8. Duplicate saves of the same completed report are rejected.
+9. Deleting a session also deletes its report and filler logs.
+10. An unused speech profile is removed after its final session is deleted.
+11. Prototype results set `isPrototypeData` to `true`.
+12. Plain-text passwords are never written to Hive.
+13. Email addresses are normalized and must be unique between users.
+14. Preferences and speech profiles must reference an existing user.
+15. Rehearsal sessions must reference an existing speech profile owned by the
+    same user.
+
+## 13. Demo Data Seeding
+
+The four demonstration sessions are inserted only when the rehearsal and
+report boxes are empty. The `applicationMetadata` box stores a versioned flag
+after successful seeding so reopening the app does not duplicate them.
+
+Clearing prototype data removes the related sessions, reports, logs, and
+unused speech profiles. The metadata flag remains set, so cleared demo data is
+not automatically restored on the next launch.

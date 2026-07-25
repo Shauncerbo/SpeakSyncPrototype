@@ -29,7 +29,7 @@ class DashboardScreen extends StatelessWidget {
                 Navigator.of(context).pushReplacementNamed('/login');
               },
               child: const Text('Log Out'),
-            )
+            ),
           ],
         ),
       ),

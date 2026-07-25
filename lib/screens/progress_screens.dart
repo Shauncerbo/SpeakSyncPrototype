@@ -100,7 +100,7 @@ class ProgressScreen extends StatelessWidget {
                   const SectionHeader('Rehearsal Ranking'),
                   const SizedBox(height: 6),
                   const Text(
-                    'Your completed rehearsals, ranked by overall score.',
+                    'Tap a rehearsal to view its full score and feedback.',
                     style: TextStyle(color: Color(0xFF617085), fontSize: 13),
                   ),
                   const SizedBox(height: 12),
@@ -118,6 +118,12 @@ class ProgressScreen extends StatelessWidget {
                           rank: entry.$1 + 1,
                           session: entry.$2,
                           isBest: entry.$1 == 0,
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) =>
+                                  SessionDetailsScreen(session: entry.$2),
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -329,11 +335,13 @@ class _RankingCard extends StatelessWidget {
     required this.rank,
     required this.session,
     required this.isBest,
+    required this.onTap,
   });
 
   final int rank;
   final PracticeSession session;
   final bool isBest;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -349,97 +357,110 @@ class _RankingCard extends StatelessWidget {
               : const Color(0xFFE2E8F0),
         ),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: highlight.withValues(alpha: .12),
-                shape: BoxShape.circle,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: highlight.withValues(alpha: .12),
+                  shape: BoxShape.circle,
+                ),
+                child: Text(
+                  '#$rank',
+                  style: TextStyle(
+                    color: highlight,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
               ),
-              child: Text(
-                '#$rank',
-                style: TextStyle(color: highlight, fontWeight: FontWeight.w900),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (isBest) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: warningOrange.withValues(alpha: .12),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Text(
-                        'BEST REHEARSAL',
-                        style: TextStyle(
-                          color: Color(0xFF9A5B00),
-                          fontSize: 10,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: .4,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (isBest) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: warningOrange.withValues(alpha: .12),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Text(
+                          'BEST REHEARSAL',
+                          style: TextStyle(
+                            color: Color(0xFF9A5B00),
+                            fontSize: 10,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: .4,
+                          ),
                         ),
                       ),
+                      const SizedBox(height: 5),
+                    ],
+                    Text(
+                      session.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: navy,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
-                    const SizedBox(height: 5),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${formatDate(session.dateTime)} • ${session.speechType}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF617085),
+                        fontSize: 12,
+                      ),
+                    ),
                   ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
                   Text(
-                    session.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: navy,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800,
+                    '${session.overallScore}',
+                    style: TextStyle(
+                      color: highlight,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w900,
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${formatDate(session.dateTime)} • ${session.speechType}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Color(0xFF617085),
-                      fontSize: 12,
+                  const Text(
+                    'SCORE',
+                    style: TextStyle(
+                      color: Color(0xFF7A8798),
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: .5,
                     ),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  '${session.overallScore}',
-                  style: TextStyle(
-                    color: highlight,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const Text(
-                  'SCORE',
-                  style: TextStyle(
-                    color: Color(0xFF7A8798),
-                    fontSize: 9,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: .5,
-                  ),
-                ),
-              ],
-            ),
-          ],
+              const SizedBox(width: 2),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: Color(0xFF8B98AA),
+                size: 18,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -455,6 +476,12 @@ class SessionDetailsScreen extends StatelessWidget {
     final fillers = session.fillerCounts.entries.where(
       (entry) => entry.value > 0,
     );
+    final strengths = <MapEntry<String, int>>[
+      MapEntry('Pace', session.paceScore),
+      MapEntry('Filler Control', session.fillerScore),
+      MapEntry('Posture', session.postureScore),
+      MapEntry('Camera Attention', session.attentionScore),
+    ]..sort((a, b) => b.value.compareTo(a.value));
     return Scaffold(
       appBar: AppBar(title: const Text('Session Details')),
       body: SafeArea(
@@ -507,6 +534,30 @@ class SessionDetailsScreen extends StatelessWidget {
                 _DetailScore(
                   label: 'Camera Attention',
                   value: session.attentionScore,
+                ),
+                const SizedBox(height: 14),
+                const SectionHeader('What you did well'),
+                const SizedBox(height: 12),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      children: strengths
+                          .take(2)
+                          .map(
+                            (strength) => Padding(
+                              padding: EdgeInsets.only(
+                                bottom: strength == strengths.first ? 14 : 0,
+                              ),
+                              child: _StrengthRow(
+                                label: strength.key,
+                                score: strength.value,
+                              ),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 26),
                 const SectionHeader('Filler frequencies'),
@@ -618,6 +669,62 @@ class SessionDetailsScreen extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _StrengthRow extends StatelessWidget {
+  const _StrengthRow({required this.label, required this.score});
+
+  final String label;
+  final int score;
+
+  String get message => switch (label) {
+    'Pace' => 'Your speaking rhythm was clear and easy to follow.',
+    'Filler Control' => 'You kept distracting filler words under control.',
+    'Posture' => 'You maintained confident and steady body language.',
+    _ => 'You stayed engaged with the camera and your audience.',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: successGreen.withValues(alpha: .12),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.check_rounded, color: successGreen, size: 20),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '$label · $score/100',
+                style: const TextStyle(
+                  color: navy,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                message,
+                style: const TextStyle(
+                  color: Color(0xFF526277),
+                  fontSize: 13,
+                  height: 1.35,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

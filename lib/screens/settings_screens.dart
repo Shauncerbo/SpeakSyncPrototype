@@ -9,16 +9,27 @@ import '../login.dart';
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
-  void _update(BuildContext context, AppPreferences preferences) {
-    AppStateScope.of(context, listen: false).updatePreferences(preferences);
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        const SnackBar(
-          content: Text('Settings saved.'),
-          duration: Duration(milliseconds: 900),
-        ),
+  Future<void> _update(BuildContext context, AppPreferences preferences) async {
+    try {
+      await AppStateScope.of(
+        context,
+        listen: false,
+      ).updatePreferences(preferences);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Settings saved.'),
+            duration: Duration(milliseconds: 900),
+          ),
+        );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to save settings: $error')),
       );
+    }
   }
 
   Future<void> _privacy(BuildContext context) {
@@ -62,7 +73,7 @@ class SettingsScreen extends StatelessWidget {
         content: Text(
           '${state.sessions.length} rehearsal sessions are currently available, '
           'using ${state.totalPracticeTime.inMinutes} minutes of prototype practice data.\n\n'
-          'Hive persistence is planned but is not connected yet, so this data resets when the app state is restarted.',
+          'These rehearsal reports and your preferences are stored locally on this device using Hive.',
         ),
         actions: [
           FilledButton(
@@ -78,9 +89,10 @@ class SettingsScreen extends StatelessWidget {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Reset prototype data?'),
+        title: const Text('Clear prototype data?'),
         content: const Text(
-          'This will restore the initial dummy sessions and default preferences.',
+          'This will permanently remove all prototype rehearsal sessions, '
+          'reports, and filler-word logs from this device.',
         ),
         actions: [
           TextButton(
@@ -90,16 +102,45 @@ class SettingsScreen extends StatelessWidget {
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
             style: FilledButton.styleFrom(backgroundColor: errorRed),
-            child: const Text('Reset'),
+            child: const Text('Clear'),
           ),
         ],
       ),
     );
     if (confirmed != true || !context.mounted) return;
-    AppStateScope.of(context, listen: false).reset();
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Prototype data has been reset.')),
-    );
+    try {
+      await AppStateScope.of(context, listen: false).clearPrototypeData();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Prototype data has been cleared.')),
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to clear prototype data: $error')),
+      );
+    }
+  }
+
+  Future<void> _restoreDemoData(BuildContext context) async {
+    try {
+      final restored = await AppStateScope.of(
+        context,
+        listen: false,
+      ).restoreDemoData();
+      if (!context.mounted) return;
+      final message = restored == 0
+          ? 'All demo sessions are already available.'
+          : '$restored demo session${restored == 1 ? '' : 's'} restored.';
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to restore demo sessions: $error')),
+      );
+    }
   }
 
   Future<void> _logout(BuildContext context) async {
@@ -173,80 +214,10 @@ class SettingsScreen extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               const Text(
-                'Adjust your default practice experience.',
+                'Manage monitoring, feedback, and local data.',
                 style: TextStyle(color: Color(0xFF617085), fontSize: 15),
               ),
               const SizedBox(height: 26),
-              const SectionHeader('Practice preferences'),
-              const SizedBox(height: 12),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                  child: Column(
-                    children: [
-                      DropdownButtonFormField<String>(
-                        initialValue: preferences.defaultLanguage,
-                        decoration: const InputDecoration(
-                          labelText: 'Default language',
-                        ),
-                        items:
-                            const [
-                                  'English',
-                                  'English–Filipino',
-                                  'English–Bisaya',
-                                  'Mixed Language',
-                                ]
-                                .map(
-                                  (value) => DropdownMenuItem(
-                                    value: value,
-                                    child: Text(value),
-                                  ),
-                                )
-                                .toList(),
-                        onChanged: (value) {
-                          if (value != null) {
-                            _update(
-                              context,
-                              preferences.copyWith(defaultLanguage: value),
-                            );
-                          }
-                        },
-                      ),
-                      const SizedBox(height: 14),
-                      DropdownButtonFormField<String>(
-                        initialValue: preferences.defaultDuration,
-                        decoration: const InputDecoration(
-                          labelText: 'Default duration',
-                        ),
-                        items:
-                            const [
-                                  '1 minute',
-                                  '3 minutes',
-                                  '5 minutes',
-                                  '10 minutes',
-                                  'No fixed duration',
-                                ]
-                                .map(
-                                  (value) => DropdownMenuItem(
-                                    value: value,
-                                    child: Text(value),
-                                  ),
-                                )
-                                .toList(),
-                        onChanged: (value) {
-                          if (value != null) {
-                            _update(
-                              context,
-                              preferences.copyWith(defaultDuration: value),
-                            );
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 24),
               const SectionHeader('Monitoring'),
               const SizedBox(height: 12),
               Card(
@@ -421,11 +392,23 @@ class SettingsScreen extends StatelessWidget {
                   children: [
                     ListTile(
                       leading: const Icon(
-                        Icons.restart_alt_rounded,
+                        Icons.restore_rounded,
+                        color: primaryBlue,
+                      ),
+                      title: const Text('Restore Demo Sessions'),
+                      subtitle: const Text(
+                        'Bring back the four sample rehearsals',
+                      ),
+                      onTap: () => _restoreDemoData(context),
+                    ),
+                    const Divider(height: 1, indent: 16, endIndent: 16),
+                    ListTile(
+                      leading: const Icon(
+                        Icons.delete_sweep_outlined,
                         color: errorRed,
                       ),
                       title: const Text(
-                        'Reset Prototype Data',
+                        'Clear Prototype Data',
                         style: TextStyle(color: errorRed),
                       ),
                       onTap: () => _reset(context),

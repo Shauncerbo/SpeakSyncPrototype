@@ -27,7 +27,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _middleNameController.dispose();
     _lastNameController.dispose();
     _emailController.dispose();
-    _passwordController.dispose();  
+    _passwordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
   }
@@ -50,7 +50,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() => _isLoading = true);
     await Future.delayed(const Duration(seconds: 2));
 
-    final errorMessage = AuthService.registerUser(firstName, middleName.isEmpty ? null : middleName, lastName, email, password);
+    final errorMessage = AuthService.registerUser(
+      firstName,
+      middleName.isEmpty ? null : middleName,
+      lastName,
+      email,
+      password,
+    );
     if (!mounted) return;
 
     setState(() => _isLoading = false);
@@ -86,7 +92,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('Register Account', style: TextStyle(color: Colors.white)),
+        title: const Text(
+          'Register Account',
+          style: TextStyle(color: Colors.white),
+        ),
         backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
@@ -113,7 +122,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     'SpeakSync',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 36, 
+                      fontSize: 36,
                       fontWeight: FontWeight.w900,
                       color: Colors.white,
                       letterSpacing: -1,
@@ -133,7 +142,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     decoration: InputDecoration(
                       labelText: 'First Name',
                       labelStyle: const TextStyle(color: Color(0xFF9EB1C7)),
-                      prefixIcon: const Icon(Icons.person_outline, color: Color(0xFF9EB1C7)),
+                      prefixIcon: const Icon(
+                        Icons.person_outline,
+                        color: Color(0xFF9EB1C7),
+                      ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: const BorderSide(color: Color(0xFF294966)),
@@ -159,7 +171,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     decoration: InputDecoration(
                       labelText: 'Middle Name (Optional)',
                       labelStyle: const TextStyle(color: Color(0xFF9EB1C7)),
-                      prefixIcon: const Icon(Icons.person_outline, color: Color(0xFF9EB1C7)),
+                      prefixIcon: const Icon(
+                        Icons.person_outline,
+                        color: Color(0xFF9EB1C7),
+                      ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: const BorderSide(color: Color(0xFF294966)),
@@ -179,7 +194,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     decoration: InputDecoration(
                       labelText: 'Last Name',
                       labelStyle: const TextStyle(color: Color(0xFF9EB1C7)),
-                      prefixIcon: const Icon(Icons.person_outline, color: Color(0xFF9EB1C7)),
+                      prefixIcon: const Icon(
+                        Icons.person_outline,
+                        color: Color(0xFF9EB1C7),
+                      ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: const BorderSide(color: Color(0xFF294966)),
@@ -207,7 +225,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     decoration: InputDecoration(
                       labelText: 'SHS Email Address',
                       labelStyle: const TextStyle(color: Color(0xFF9EB1C7)),
-                      prefixIcon: const Icon(Icons.email_outlined, color: Color(0xFF9EB1C7)),
+                      prefixIcon: const Icon(
+                        Icons.email_outlined,
+                        color: Color(0xFF9EB1C7),
+                      ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: const BorderSide(color: Color(0xFF294966)),
@@ -238,7 +259,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     decoration: InputDecoration(
                       labelText: 'Password',
                       labelStyle: const TextStyle(color: Color(0xFF9EB1C7)),
-                      prefixIcon: const Icon(Icons.lock_outline, color: Color(0xFF9EB1C7)),
+                      prefixIcon: const Icon(
+                        Icons.lock_outline,
+                        color: Color(0xFF9EB1C7),
+                      ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: const BorderSide(color: Color(0xFF294966)),
@@ -251,11 +275,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       fillColor: const Color(0x33000000),
                       suffixIcon: IconButton(
                         icon: Icon(
-                          _isPasswordHidden ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                          _isPasswordHidden
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
                           color: const Color(0xFF9EB1C7),
                         ),
                         onPressed: () {
-                          setState(() => _isPasswordHidden = !_isPasswordHidden);
+                          setState(
+                            () => _isPasswordHidden = !_isPasswordHidden,
+                          );
                         },
                       ),
                     ),
@@ -278,7 +306,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     decoration: InputDecoration(
                       labelText: 'Confirm Password',
                       labelStyle: const TextStyle(color: Color(0xFF9EB1C7)),
-                      prefixIcon: const Icon(Icons.lock_outline, color: Color(0xFF9EB1C7)),
+                      prefixIcon: const Icon(
+                        Icons.lock_outline,
+                        color: Color(0xFF9EB1C7),
+                      ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: const BorderSide(color: Color(0xFF294966)),
@@ -305,16 +336,27 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       backgroundColor: const Color(0xFF67E8F9),
                       foregroundColor: const Color(0xFF0F172A),
                       padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                       elevation: 0,
                     ),
                     child: _isLoading
                         ? const SizedBox(
                             height: 20,
                             width: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF0F172A)),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Color(0xFF0F172A),
+                            ),
                           )
-                        : const Text('Create Account', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        : const Text(
+                            'Create Account',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                   ),
                   const SizedBox(height: 24),
                 ],
