@@ -378,11 +378,14 @@ class HiveRepository {
       await _reports.deleteAll(reportKeys);
       await _fillerLogs.deleteAll(logKeys);
       await _sessions.delete(sessionId);
-      final profileStillUsed = _sessions.values.any(
-        (item) => item.speechProfileId == session.speechProfileId,
-      );
-      if (!profileStillUsed) {
-        await _speechProfiles.delete(session.speechProfileId);
+      final speechProfileId = session.speechProfileId;
+      if (speechProfileId != null) {
+        final profileStillUsed = _sessions.values.any(
+          (item) => item.speechProfileId == speechProfileId,
+        );
+        if (!profileStillUsed) {
+          await _speechProfiles.delete(speechProfileId);
+        }
       }
     } catch (error) {
       throw StorageException('Unable to delete the rehearsal session', error);
@@ -558,13 +561,17 @@ class HiveRepository {
   }) {
     _requireId(session.sessionId, 'sessionId');
     _requireId(session.userId, 'userId');
-    _requireId(session.speechProfileId, 'speechProfileId');
+    final speechProfileId = session.speechProfileId;
+    if (speechProfileId != null) {
+      _requireId(speechProfileId, 'speechProfileId');
+    }
     _requireNonNegative(session.targetDurationSeconds, 'target duration');
     _requireNonNegative(session.durationSeconds, 'duration');
     if (!requireRelationships) return;
 
     _requireUser(session.userId);
-    final profile = _requireSpeechProfile(session.speechProfileId);
+    if (speechProfileId == null) return;
+    final profile = _requireSpeechProfile(speechProfileId);
     if (profile.userId != session.userId) {
       throw StorageException(
         'Rehearsal session ${session.sessionId} and speech profile '

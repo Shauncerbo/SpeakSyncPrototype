@@ -278,7 +278,7 @@ void main() {
       RehearsalSession session({
         required String sessionId,
         required String userId,
-        required String speechProfileId,
+        String? speechProfileId,
       }) {
         return RehearsalSession(
           sessionId: sessionId,
@@ -330,6 +330,17 @@ void main() {
         repository.getAllRehearsalSessions(userA.userId).single.speechProfileId,
         profileA.speechProfileId,
       );
+
+      await repository.saveRehearsalSession(
+        session(sessionId: 'session-without-profile', userId: userA.userId),
+      );
+      expect(
+        repository
+            .getAllRehearsalSessions(userA.userId)
+            .any((item) => item.sessionId == 'session-without-profile'),
+        isTrue,
+      );
+      await repository.deleteSessionWithRelatedData('session-without-profile');
     },
   );
 }

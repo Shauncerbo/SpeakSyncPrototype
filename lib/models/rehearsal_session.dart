@@ -7,7 +7,7 @@ class RehearsalSession {
   const RehearsalSession({
     required this.sessionId,
     required this.userId,
-    required this.speechProfileId,
+    this.speechProfileId,
     required this.speechTitle,
     required this.speechType,
     required this.languageMode,
@@ -28,7 +28,7 @@ class RehearsalSession {
   final String userId;
 
   @HiveField(2)
-  final String speechProfileId;
+  final String? speechProfileId;
 
   @HiveField(3)
   final String speechTitle;

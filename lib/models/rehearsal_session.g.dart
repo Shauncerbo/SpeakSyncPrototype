@@ -19,7 +19,7 @@ class RehearsalSessionAdapter extends TypeAdapter<RehearsalSession> {
     return RehearsalSession(
       sessionId: fields[0] as String,
       userId: fields[1] as String,
-      speechProfileId: fields[2] as String,
+      speechProfileId: fields[2] as String?,
       speechTitle: fields[3] as String,
       speechType: fields[4] as String,
       languageMode: fields[5] as String,
