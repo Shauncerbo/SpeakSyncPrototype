@@ -10,6 +10,7 @@ class FillerWordLog {
     required this.fillerWord,
     required this.occurrenceCount,
     required this.detectedTimes,
+    this.transcriptOffsets = const [],
   });
 
   @HiveField(0)
@@ -26,4 +27,9 @@ class FillerWordLog {
 
   @HiveField(4)
   final List<int> detectedTimes;
+
+  /// Text positions in the normalized transcript, not audio timestamps.
+  /// Legacy logs retain detectedTimes; transcript-only logs leave times empty.
+  @HiveField(5, defaultValue: <int>[])
+  final List<int> transcriptOffsets;
 }

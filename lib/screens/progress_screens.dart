@@ -4,6 +4,8 @@ import '../core/app_theme.dart';
 import '../models/practice_session.dart';
 import '../state/app_state.dart';
 import '../widgets/common_widgets.dart';
+import '../widgets/speaking_pace_card.dart';
+import '../widgets/filler_frequency_card.dart';
 import 'practice_flow.dart';
 
 class ProgressScreen extends StatelessWidget {
@@ -473,7 +475,8 @@ class SessionDetailsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fillers = session.fillerCounts.entries.where(
+    final fillerAnalysis = session.fillerAnalysis;
+    final fillers = fillerAnalysis.counts.entries.where(
       (entry) => entry.value > 0,
     );
     final strengths = <MapEntry<String, int>>[
@@ -525,11 +528,8 @@ class SessionDetailsScreen extends StatelessWidget {
                 const SizedBox(height: 30),
                 const SectionHeader('Score breakdown'),
                 const SizedBox(height: 12),
-                _DetailScore(label: 'Pace', value: session.paceScore),
-                _DetailScore(
-                  label: 'Filler Control',
-                  value: session.fillerScore,
-                ),
+                SpeakingPaceCard(pace: session.speakingPace),
+                FillerFrequencyCard(analysis: fillerAnalysis),
                 _DetailScore(label: 'Posture', value: session.postureScore),
                 _DetailScore(
                   label: 'Camera Attention',
@@ -566,7 +566,11 @@ class SessionDetailsScreen extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.all(16),
                     child: fillers.isEmpty
-                        ? const Text('No selected filler words were detected.')
+                        ? Text(
+                            fillerAnalysis.hasTranscript
+                                ? 'No listed filler words were found in the transcript.'
+                                : 'Filler detection requires a transcript.',
+                          )
                         : Column(
                             children: fillers
                                 .map(
@@ -612,6 +616,16 @@ class SessionDetailsScreen extends StatelessWidget {
                         ),
                       ),
                     ),
+                  ),
+                ],
+                if (session.referenceScript?.trim().isNotEmpty == true) ...[
+                  const SizedBox(height: 26),
+                  ScriptComparisonSummary(
+                    documentName: session.referenceDocumentName,
+                    omittedPortions: session.omittedScriptPortions,
+                    addedPortions: session.addedTranscriptPortions,
+                    differentlyDeliveredPortions:
+                        session.differentlyDeliveredPortions,
                   ),
                 ],
                 const SizedBox(height: 26),

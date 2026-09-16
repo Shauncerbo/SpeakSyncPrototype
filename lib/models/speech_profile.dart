@@ -12,6 +12,7 @@ class SpeechProfile {
     required this.languageMode,
     required this.targetDurationSeconds,
     required this.speechContent,
+    this.sourceDocumentName,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -42,4 +43,7 @@ class SpeechProfile {
 
   @HiveField(8)
   final DateTime updatedAt;
+
+  @HiveField(9)
+  final String? sourceDocumentName;
 }

@@ -24,6 +24,7 @@ class SpeechProfileAdapter extends TypeAdapter<SpeechProfile> {
       languageMode: fields[4] as String,
       targetDurationSeconds: fields[5] as int,
       speechContent: fields[6] as String?,
+      sourceDocumentName: fields[9] as String?,
       createdAt: fields[7] as DateTime,
       updatedAt: fields[8] as DateTime,
     );
@@ -32,7 +33,7 @@ class SpeechProfileAdapter extends TypeAdapter<SpeechProfile> {
   @override
   void write(BinaryWriter writer, SpeechProfile obj) {
     writer
-      ..writeByte(9)
+      ..writeByte(10)
       ..writeByte(0)
       ..write(obj.speechProfileId)
       ..writeByte(1)
@@ -50,7 +51,9 @@ class SpeechProfileAdapter extends TypeAdapter<SpeechProfile> {
       ..writeByte(7)
       ..write(obj.createdAt)
       ..writeByte(8)
-      ..write(obj.updatedAt);
+      ..write(obj.updatedAt)
+      ..writeByte(9)
+      ..write(obj.sourceDocumentName);
   }
 
   @override

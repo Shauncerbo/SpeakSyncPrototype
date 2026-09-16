@@ -2,6 +2,7 @@ class PracticeSettings {
   const PracticeSettings({
     required this.speechTitle,
     this.speechContent,
+    this.referenceDocumentName,
     required this.speechType,
     required this.languageMode,
     required this.selectedDuration,
@@ -14,6 +15,7 @@ class PracticeSettings {
 
   final String speechTitle;
   final String? speechContent;
+  final String? referenceDocumentName;
   final String speechType;
   final String languageMode;
   final String selectedDuration;

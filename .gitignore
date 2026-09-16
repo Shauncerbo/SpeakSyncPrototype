@@ -33,6 +33,10 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# Local API configuration (use .env.json.example as the template)
+.env.json
+.env
+
 # Symbolication related
 app.*.symbols
 

@@ -1,9 +1,32 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:speaksync_prototype/app.dart';
 import 'package:speaksync_prototype/models/practice_session.dart';
 import 'package:speaksync_prototype/screens/practice_flow.dart';
+import 'package:speaksync_prototype/services/internet_connectivity_service.dart';
 import 'package:speaksync_prototype/state/app_state.dart';
+
+class _FakeInternetConnectivity implements InternetConnectivity {
+  _FakeInternetConnectivity(this._connected);
+
+  bool _connected;
+  final _controller = StreamController<bool>.broadcast();
+
+  @override
+  Future<bool> check() async => _connected;
+
+  @override
+  Stream<bool> get statusChanges => _controller.stream;
+
+  void setConnected(bool connected) {
+    _connected = connected;
+    _controller.add(connected);
+  }
+
+  Future<void> dispose() => _controller.close();
+}
 
 void main() {
   Future<void> setPhoneSize(WidgetTester tester) async {
@@ -12,14 +35,23 @@ void main() {
     addTearDown(tester.view.reset);
   }
 
-  Future<AppState> openHome(WidgetTester tester) async {
+  Future<AppState> openHome(
+    WidgetTester tester, {
+    InternetConnectivity? internetConnectivity,
+  }) async {
     final state = AppState();
+    final connectivity =
+        internetConnectivity ?? _FakeInternetConnectivity(true);
+    if (internetConnectivity == null) {
+      addTearDown((connectivity as _FakeInternetConnectivity).dispose);
+    }
     await tester.pumpWidget(
       SpeakSyncApp(
         appState: state,
         splashDuration: Duration.zero,
         analysisDuration: Duration.zero,
         deviceCheckDuration: Duration.zero,
+        internetConnectivity: connectivity,
       ),
     );
     await tester.pump(Duration.zero);
@@ -46,7 +78,7 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('speech_type')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Prepared').last);
+    await tester.tap(find.text('Impromptu').last);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('language_mode')));
     await tester.pumpAndSettle();
@@ -62,19 +94,26 @@ void main() {
   }
 
   Future<void> openRehearsal(WidgetTester tester) async {
-    final startButton = find.byKey(const Key('start_rehearsal'));
+    final startButton = find.byKey(const Key('ready_rehearsal'));
     await tester.ensureVisible(startButton);
     await tester.pump();
     expect(tester.widget<FilledButton>(startButton).onPressed, isNotNull);
     await tester.tap(startButton);
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
+    for (var second = 0; second < 3; second++) {
+      await tester.pump(const Duration(seconds: 1));
+    }
+    await tester.pump();
     expect(find.text('Rehearsal'), findsOneWidget);
   }
 
   testWidgets('1. Splash loads', (tester) async {
     await setPhoneSize(tester);
-    await tester.pumpWidget(SpeakSyncApp(appState: AppState()));
+    final connectivity = _FakeInternetConnectivity(true);
+    addTearDown(connectivity.dispose);
+    await tester.pumpWidget(
+      SpeakSyncApp(appState: AppState(), internetConnectivity: connectivity),
+    );
 
     expect(find.text('SpeakSync'), findsOneWidget);
     expect(
@@ -87,8 +126,14 @@ void main() {
   testWidgets('2. Get Started opens main app', (tester) async {
     await setPhoneSize(tester);
     final state = AppState();
+    final connectivity = _FakeInternetConnectivity(true);
+    addTearDown(connectivity.dispose);
     await tester.pumpWidget(
-      SpeakSyncApp(appState: state, splashDuration: Duration.zero),
+      SpeakSyncApp(
+        appState: state,
+        splashDuration: Duration.zero,
+        internetConnectivity: connectivity,
+      ),
     );
     await tester.pump(Duration.zero);
     await tester.pumpAndSettle();
@@ -114,7 +159,7 @@ void main() {
 
     expect(find.text('Practice Setup'), findsOneWidget);
     expect(find.byKey(const Key('speech_title')), findsOneWidget);
-    expect(find.byKey(const Key('speech_content')), findsOneWidget);
+    expect(find.byKey(const Key('speech_type')), findsOneWidget);
   });
 
   testWidgets('4. Empty title shows validation', (tester) async {
@@ -129,18 +174,128 @@ void main() {
     expect(find.text('Please enter a speech title.'), findsOneWidget);
   });
 
-  testWidgets('5. Valid setup reaches Device Check', (tester) async {
+  testWidgets('5. Valid setup opens camera readiness before rehearsal', (
+    tester,
+  ) async {
     await setPhoneSize(tester);
     await openHome(tester);
     await openSetup(tester);
     await enterValidSetup(tester);
 
-    expect(find.text('Device Check'), findsOneWidget);
-    expect(find.text('Camera'), findsOneWidget);
-    expect(find.text('Microphone'), findsOneWidget);
-    expect(find.text('Lighting'), findsNothing);
-    expect(find.text('Upper Body'), findsNothing);
+    expect(find.text('Camera Preview'), findsOneWidget);
+    expect(find.byKey(const Key('rehearsal_readiness')), findsOneWidget);
+    expect(find.byKey(const Key('rehearsal_timer')), findsNothing);
+    expect(find.byKey(const Key('toggle_microphone')), findsNothing);
+    expect(find.byKey(const Key('end_session')), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
   });
+
+  testWidgets('Preview and countdown time are excluded from the saved report', (
+    tester,
+  ) async {
+    await setPhoneSize(tester);
+    final state = await openHome(tester);
+    await openSetup(tester);
+    await enterValidSetup(tester, duration: '1 minute');
+    await tester.pump(const Duration(minutes: 2));
+    expect(find.byKey(const Key('rehearsal_timer')), findsNothing);
+    expect(find.byKey(const Key('prototype_alert_controls')), findsNothing);
+    expect(find.byKey(const Key('filler_metric')), findsNothing);
+    await tester.ensureVisible(find.byKey(const Key('ready_rehearsal')));
+    await tester.tap(find.byKey(const Key('ready_rehearsal')));
+    await tester.pump();
+    for (final number in ['3', '2', '1']) {
+      expect(
+        tester.widget<Text>(find.byKey(const Key('readiness_countdown'))).data,
+        number,
+      );
+      expect(find.byKey(const Key('rehearsal_timer')), findsNothing);
+      await tester.pump(const Duration(seconds: 1));
+    }
+    await tester.pump();
+    expect(find.text('01:00'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 10));
+    await tester.ensureVisible(find.byKey(const Key('end_session')));
+    await tester.tap(find.byKey(const Key('end_session')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirm_end_session')));
+    await tester.pumpAndSettle();
+    expect(state.currentReport?.duration, const Duration(seconds: 10));
+  });
+
+  testWidgets('Countdown cancellation returns to preview and can start again', (
+    tester,
+  ) async {
+    await setPhoneSize(tester);
+    final state = await openHome(tester);
+    final count = state.sessions.length;
+    await openSetup(tester);
+    await enterValidSetup(tester);
+    await tester.ensureVisible(find.byKey(const Key('ready_rehearsal')));
+    await tester.tap(find.byKey(const Key('ready_rehearsal')));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.tap(find.byKey(const Key('cancel_countdown')));
+    await tester.pump(const Duration(seconds: 5));
+    expect(find.byKey(const Key('readiness_countdown')), findsNothing);
+    expect(find.byKey(const Key('rehearsal_readiness')), findsOneWidget);
+    expect(find.byKey(const Key('rehearsal_timer')), findsNothing);
+    expect(state.sessions.length, count);
+    expect(state.currentReport, isNull);
+    await openRehearsal(tester);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  for (final duringCountdown in [false, true]) {
+    testWidgets(
+      'Back before rehearsal saves nothing (countdown: $duringCountdown)',
+      (tester) async {
+        await setPhoneSize(tester);
+        final state = await openHome(tester);
+        final count = state.sessions.length;
+        await openSetup(tester);
+        await enterValidSetup(tester);
+        if (duringCountdown) {
+          await tester.ensureVisible(find.byKey(const Key('ready_rehearsal')));
+          await tester.tap(find.byKey(const Key('ready_rehearsal')));
+          await tester.pump();
+          await tester.pump(const Duration(seconds: 1));
+          await tester.binding.handlePopRoute();
+        } else {
+          await tester.tap(find.byKey(const Key('leave_readiness')));
+        }
+        await tester.pumpAndSettle();
+        await tester.pump(const Duration(seconds: 5));
+        expect(find.text('Practice Setup'), findsOneWidget);
+        expect(find.text('Performance Report'), findsNothing);
+        expect(state.currentReport, isNull);
+        expect(state.sessions.length, count);
+      },
+    );
+  }
+
+  testWidgets(
+    'Backgrounding cancels the countdown without starting rehearsal',
+    (tester) async {
+      await setPhoneSize(tester);
+      await openHome(tester);
+      await openSetup(tester);
+      await enterValidSetup(tester);
+      await tester.ensureVisible(find.byKey(const Key('ready_rehearsal')));
+      await tester.tap(find.byKey(const Key('ready_rehearsal')));
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump(const Duration(seconds: 5));
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(find.byKey(const Key('readiness_countdown')), findsNothing);
+      expect(find.byKey(const Key('rehearsal_timer')), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    },
+  );
 
   testWidgets('6. Rehearsal loads', (tester) async {
     await setPhoneSize(tester);
@@ -187,6 +342,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
 
     expect(find.text('Performance Report'), findsOneWidget);
     expect(find.text('Environmental Awareness Speech'), findsOneWidget);
@@ -212,9 +368,69 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
 
     expect(find.text('Performance Report'), findsOneWidget);
     expect(state.currentReport?.duration, const Duration(minutes: 1));
+  });
+
+  testWidgets('Restart confirmation resets timer and allows another restart', (
+    tester,
+  ) async {
+    await setPhoneSize(tester);
+    final state = await openHome(tester);
+    final savedCount = state.sessions.length;
+    await openSetup(tester);
+    await enterValidSetup(tester, duration: '1 minute');
+    await openRehearsal(tester);
+
+    for (var attempt = 0; attempt < 2; attempt++) {
+      await tester.pump(const Duration(seconds: 30));
+      expect(find.text('00:30'), findsOneWidget);
+      await tester.ensureVisible(find.byKey(const Key('restart_session')));
+      await tester.tap(find.byKey(const Key('restart_session')));
+      await tester.pump(const Duration(milliseconds: 500));
+      // The old attempt must not end while confirmation is open.
+      await tester.pump(const Duration(seconds: 40));
+      expect(find.text('Performance Report'), findsNothing);
+      await tester.tap(find.byKey(const Key('confirm_restart_session')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.text('01:00'), findsOneWidget);
+      expect(state.sessions.length, savedCount);
+      expect(
+        tester
+            .widget<OutlinedButton>(find.byKey(const Key('restart_session')))
+            .onPressed,
+        isNotNull,
+      );
+    }
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('00:59'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('Cancel restart keeps existing rehearsal progress', (
+    tester,
+  ) async {
+    await setPhoneSize(tester);
+    await openHome(tester);
+    await openSetup(tester);
+    await enterValidSetup(tester, duration: '1 minute');
+    await openRehearsal(tester);
+    await tester.pump(const Duration(seconds: 10));
+    expect(find.text('00:50'), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const Key('restart_session')));
+    await tester.tap(find.byKey(const Key('restart_session')));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tap(find.text('Cancel'));
+    await tester.pump();
+    expect(find.text('00:50'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('00:49'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
   });
 
   testWidgets('10. Saving adds a progress entry', (tester) async {
@@ -274,5 +490,94 @@ void main() {
     await tester.pump();
 
     expect(state.preferences.liveFeedback, isFalse);
+  });
+
+  testWidgets('12. Device Check reacts to internet changes', (tester) async {
+    await setPhoneSize(tester);
+    final connectivity = _FakeInternetConnectivity(false);
+    addTearDown(connectivity.dispose);
+    await openHome(tester, internetConnectivity: connectivity);
+    await openSetup(tester);
+    await enterValidSetup(tester);
+    await tester.ensureVisible(find.byKey(const Key('preview_device_check')));
+    await tester.tap(find.byKey(const Key('preview_device_check')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Not available'), findsOneWidget);
+    var startButton = find.byKey(const Key('start_rehearsal'));
+    expect(tester.widget<FilledButton>(startButton).onPressed, isNull);
+
+    connectivity.setConnected(true);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Available'), findsOneWidget);
+    expect(find.text("You're back online."), findsOneWidget);
+    startButton = find.byKey(const Key('start_rehearsal'));
+    expect(tester.widget<FilledButton>(startButton).onPressed, isNotNull);
+
+    connectivity.setConnected(false);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Not available'), findsOneWidget);
+    expect(
+      find.text("You're offline. Check your internet connection."),
+      findsOneWidget,
+    );
+    expect(tester.widget<FilledButton>(startButton).onPressed, isNull);
+  });
+
+  testWidgets('Connection messages follow navigation and do not repeat', (
+    tester,
+  ) async {
+    await setPhoneSize(tester);
+    final connectivity = _FakeInternetConnectivity(true);
+    addTearDown(connectivity.dispose);
+    await openHome(tester, internetConnectivity: connectivity);
+    await tester.pump(const Duration(seconds: 4));
+    connectivity.setConnected(false);
+    await tester.pump();
+    await tester.pump();
+    expect(
+      find.text("You're offline. Check your internet connection."),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Progress'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('connection_notice')), findsOneWidget);
+    await tester.pump(const Duration(seconds: 4));
+    connectivity.setConnected(false);
+    await tester.pump();
+    await tester.pump();
+    expect(find.byKey(const Key('connection_notice')), findsNothing);
+
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    connectivity.setConnected(true);
+    await tester.pump();
+    await tester.pump();
+    expect(find.text("You're back online."), findsOneWidget);
+    await tester.pump(const Duration(seconds: 4));
+    expect(find.byKey(const Key('connection_notice')), findsNothing);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    connectivity.setConnected(false);
+    await tester.pump();
+    expect(find.byKey(const Key('connection_notice')), findsNothing);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump();
+    expect(
+      find.text("You're offline. Check your internet connection."),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
   });
 }

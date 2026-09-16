@@ -1,3 +1,6 @@
+import '../services/speaking_pace.dart';
+import '../services/filler_analysis.dart';
+
 class PracticeSession {
   const PracticeSession({
     required this.id,
@@ -14,6 +17,11 @@ class PracticeSession {
     required this.fillerCounts,
     required this.coachingTips,
     this.textTranscript,
+    this.referenceScript,
+    this.referenceDocumentName,
+    this.omittedScriptPortions = const [],
+    this.addedTranscriptPortions = const [],
+    this.differentlyDeliveredPortions = const [],
     this.transcriptLines = const [],
     this.gestureCounts = const {},
     this.recommendedPosture = 'Maintain a steady upper-body posture.',
@@ -34,8 +42,20 @@ class PracticeSession {
   final Map<String, int> fillerCounts;
   final List<String> coachingTips;
   final String? textTranscript;
+  final String? referenceScript;
+  final String? referenceDocumentName;
+  final List<String> omittedScriptPortions;
+  final List<String> addedTranscriptPortions;
+  final List<String> differentlyDeliveredPortions;
   final List<String> transcriptLines;
   final Map<String, int> gestureCounts;
   final String recommendedPosture;
   final bool isPrototypeData;
+
+  // textTranscript is populated from PerformanceReport when loading history.
+  SpeakingPace get speakingPace =>
+      SpeakingPace.fromTranscript(textTranscript, duration);
+
+  FillerAnalysis get fillerAnalysis =>
+      FillerAnalysis.fromTranscript(textTranscript, duration);
 }

@@ -59,11 +59,13 @@ void main() {
         attentionScore: 87,
         fillerCounts: const {'Kuan': 2},
         coachingTips: const ['Keep using purposeful pauses.'],
-        textTranscript: 'A short persisted prototype transcript.',
+        textTranscript: 'Kuan kuan persisted prototype transcript.',
         isPrototypeData: true,
       );
       const setup = PracticeSettings(
         speechTitle: 'Persisted Test Speech',
+        speechContent: 'A short persisted prototype reference script.',
+        referenceDocumentName: 'persisted-test-speech.txt',
         speechType: 'Prepared',
         languageMode: 'Mixed Language',
         selectedDuration: '3 minutes',
@@ -95,7 +97,10 @@ void main() {
       );
       final logs = repository.getFillerLogsBySessionId(completed.id);
       expect(logs, hasLength(1));
-      expect(logs.single.occurrenceCount, logs.single.detectedTimes.length);
+      expect(logs.single.fillerWord, 'kuan');
+      expect(logs.single.occurrenceCount, 2);
+      expect(logs.single.detectedTimes, isEmpty);
+      expect(logs.single.transcriptOffsets, [0, 5]);
 
       await Hive.close();
       repository = HiveRepository();
@@ -108,6 +113,30 @@ void main() {
       expect(repository.getPracticeSessions(), hasLength(5));
       expect(repository.getPreferences()?.defaultDuration, '5 minutes');
       expect(repository.getPreferences()?.liveFeedback, isFalse);
+
+      // The actual rehearsal lasted two minutes, although setup targeted three.
+      final savedReport = repository.getPerformanceReportBySessionId(
+        completed.id,
+      )!;
+      expect(savedReport.textTranscript, completed.textTranscript);
+      expect(savedReport.totalWords, 5);
+      expect(savedReport.wordsPerMinute, 2.5);
+      expect(savedReport.fillerCounts, {'kuan': 2});
+      expect(
+        repository
+            .getFillerLogsBySessionId(completed.id)
+            .single
+            .transcriptOffsets,
+        [0, 5],
+      );
+      expect(savedReport.paceScore, completed.paceScore);
+      expect(savedReport.overallScore, completed.overallScore);
+      final reloaded = repository.getPracticeSessions().singleWhere(
+        (session) => session.id == completed.id,
+      );
+      expect(reloaded.speakingPace.totalWords, savedReport.totalWords);
+      expect(reloaded.speakingPace.wordsPerMinute, savedReport.wordsPerMinute);
+      expect(reloaded.speakingPace.classification, 'Slow');
 
       await repository.clearPrototypeData();
       expect(repository.getPracticeSessions(), isEmpty);
@@ -141,7 +170,7 @@ void main() {
     const setup = PracticeSettings(
       speechTitle: 'AppState Speech',
       speechContent: 'This is the prepared speech script.',
-      speechType: 'Informative',
+      speechType: 'Prepared',
       languageMode: 'English',
       selectedDuration: '1 minute',
       monitorBodyLanguage: true,
@@ -166,7 +195,7 @@ void main() {
         attentionScore: 89,
         fillerCounts: const {'Ano': 1},
         coachingTips: const ['Keep your ending concise.'],
-        textTranscript: 'This report is saved through AppState.',
+        textTranscript: 'Ano, this report is saved through AppState.',
         isPrototypeData: true,
       ),
     );
@@ -187,7 +216,7 @@ void main() {
       (item) => item.id == 'app-state-persisted-session',
     );
     expect(restored.overallScore, 91);
-    expect(restored.fillerCounts, const {'Ano': 1});
+    expect(restored.fillerCounts, const {'ano': 1});
     expect(
       repository
           .getSpeechProfiles()
@@ -285,7 +314,7 @@ void main() {
           userId: userId,
           speechProfileId: speechProfileId,
           speechTitle: 'Relationship Test',
-          speechType: 'Prepared',
+          speechType: speechProfileId == null ? 'Impromptu' : 'Prepared',
           languageMode: 'English',
           targetDurationSeconds: 60,
           durationSeconds: 45,

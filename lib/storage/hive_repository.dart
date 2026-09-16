@@ -21,6 +21,12 @@ class StorageException implements Exception {
 }
 
 class HiveRepository {
+  static const supportedSpeechTypes = <String>{
+    'Prepared',
+    'Persuasive',
+    'Impromptu',
+  };
+
   late final Box<User> _users;
   late final Box<AppPreferences> _preferences;
   late final Box<SpeechProfile> _speechProfiles;
@@ -151,6 +157,17 @@ class HiveRepository {
     _requireId(profile.userId, 'userId');
     _requireUser(profile.userId);
     _requireNonNegative(profile.targetDurationSeconds, 'target duration');
+    _requireSupportedSpeechType(profile.speechType);
+    if (profile.speechType == 'Impromptu') {
+      throw const StorageException(
+        'Impromptu rehearsals must not have a prepared speech profile',
+      );
+    }
+    if (profile.speechContent?.trim().isEmpty ?? true) {
+      throw const StorageException(
+        'Prepared and persuasive speeches require a reference script',
+      );
+    }
     try {
       await _speechProfiles.put(profile.speechProfileId, profile);
     } catch (error) {
@@ -262,9 +279,10 @@ class HiveRepository {
       );
     }
 
-    final previousProfile = _speechProfiles.get(
-      records.profile.speechProfileId,
-    );
+    final profile = records.profile;
+    final previousProfile = profile == null
+        ? null
+        : _speechProfiles.get(profile.speechProfileId);
     final previousSession = _sessions.get(records.session.sessionId);
     final previousLogs = getFillerLogsBySessionId(records.session.sessionId);
     final previousReport = getPerformanceReportBySessionId(
@@ -272,7 +290,7 @@ class HiveRepository {
     );
 
     try {
-      await saveSpeechProfile(records.profile);
+      if (profile != null) await saveSpeechProfile(profile);
       await saveRehearsalSession(records.session);
       await saveFillerWordLogs(records.session.sessionId, records.logs);
       await savePerformanceReport(records.report);
@@ -414,9 +432,10 @@ class HiveRepository {
     required List<FillerWordLog> previousLogs,
     required PerformanceReport? previousReport,
   }) async {
-    if (previousProfile == null) {
-      await _speechProfiles.delete(records.profile.speechProfileId);
-    } else {
+    final profile = records.profile;
+    if (profile != null && previousProfile == null) {
+      await _speechProfiles.delete(profile.speechProfileId);
+    } else if (previousProfile != null) {
       await _speechProfiles.put(
         previousProfile.speechProfileId,
         previousProfile,
@@ -449,28 +468,36 @@ class HiveRepository {
     _requireId(practiceSession.id, 'sessionId');
     _requireNonNegative(practiceSession.duration.inSeconds, 'duration');
     final now = DateTime.now();
-    final profileId = 'speech-${practiceSession.id}';
+    final referenceScript =
+        practiceSession.referenceScript ?? settings?.speechContent;
+    final hasReferenceScript = referenceScript?.trim().isNotEmpty == true;
+    final profileId = hasReferenceScript
+        ? 'speech-${practiceSession.id}'
+        : null;
     final targetSeconds = settings == null
         ? practiceSession.duration.inSeconds
         : _targetDurationSeconds(settings.selectedDuration);
     final transcript = practiceSession.textTranscript;
-    final totalWords = _wordCount(transcript);
+    final pace = practiceSession.speakingPace;
+    final fillers = practiceSession.fillerAnalysis;
     final durationSeconds = practiceSession.duration.inSeconds;
-    final wordsPerMinute = durationSeconds == 0
-        ? 0.0
-        : totalWords * 60 / durationSeconds;
 
-    final profile = SpeechProfile(
-      speechProfileId: profileId,
-      userId: userId,
-      speechTitle: practiceSession.title,
-      speechType: practiceSession.speechType,
-      languageMode: practiceSession.languageMode,
-      targetDurationSeconds: targetSeconds,
-      speechContent: settings?.speechContent,
-      createdAt: practiceSession.dateTime,
-      updatedAt: now,
-    );
+    final profile = profileId == null
+        ? null
+        : SpeechProfile(
+            speechProfileId: profileId,
+            userId: userId,
+            speechTitle: practiceSession.title,
+            speechType: practiceSession.speechType,
+            languageMode: practiceSession.languageMode,
+            targetDurationSeconds: targetSeconds,
+            speechContent: referenceScript,
+            sourceDocumentName:
+                practiceSession.referenceDocumentName ??
+                settings?.referenceDocumentName,
+            createdAt: practiceSession.dateTime,
+            updatedAt: now,
+          );
     final session = RehearsalSession(
       sessionId: practiceSession.id,
       userId: userId,
@@ -487,26 +514,25 @@ class HiveRepository {
       speakingPaceEnabled: settings?.monitorPace ?? true,
       cameraAttentionEnabled: settings?.monitorCameraAttention ?? true,
     );
-    final logs = practiceSession.fillerCounts.entries
-        .where((entry) => entry.value > 0)
+    final logs = fillers.offsets.entries
         .map(
           (entry) => FillerWordLog(
             logId: 'log-${practiceSession.id}-${_safeIdPart(entry.key)}',
             sessionId: practiceSession.id,
             fillerWord: entry.key,
-            occurrenceCount: entry.value,
-            detectedTimes: _prototypeDetectionTimes(
-              entry.value,
-              durationSeconds,
-            ),
+            occurrenceCount: entry.value.length,
+            detectedTimes: const [],
+            transcriptOffsets: entry.value,
           ),
         )
         .toList();
     final report = PerformanceReport(
       reportId: 'report-${practiceSession.id}',
       sessionId: practiceSession.id,
-      totalWords: totalWords,
-      wordsPerMinute: wordsPerMinute,
+      totalWords: pace.totalWords,
+      // Hive retains its existing non-null double field. The UI distinguishes
+      // unavailable analysis using transcript and session duration.
+      wordsPerMinute: pace.wordsPerMinute ?? 0.0,
       paceScore: practiceSession.paceScore,
       fillerScore: practiceSession.fillerScore,
       goodPostureSeconds: (durationSeconds * practiceSession.postureScore / 100)
@@ -519,9 +545,20 @@ class HiveRepository {
       coachingTips: List<String>.from(practiceSession.coachingTips),
       textTranscript: transcript,
       createdAt: now,
-      fillerCounts: Map<String, int>.from(practiceSession.fillerCounts),
+      fillerCounts: fillers.counts,
       recommendedPosture: practiceSession.recommendedPosture,
       isPrototypeData: true,
+      referenceScript: hasReferenceScript ? referenceScript : null,
+      referenceDocumentName: practiceSession.referenceDocumentName,
+      omittedScriptPortions: List<String>.from(
+        practiceSession.omittedScriptPortions,
+      ),
+      addedTranscriptPortions: List<String>.from(
+        practiceSession.addedTranscriptPortions,
+      ),
+      differentlyDeliveredPortions: List<String>.from(
+        practiceSession.differentlyDeliveredPortions,
+      ),
     );
     return _PracticeRecords(
       profile: profile,
@@ -550,6 +587,17 @@ class HiveRepository {
       fillerCounts: Map<String, int>.unmodifiable(report.fillerCounts),
       coachingTips: List<String>.unmodifiable(report.coachingTips),
       textTranscript: report.textTranscript,
+      referenceScript: report.referenceScript,
+      referenceDocumentName: report.referenceDocumentName,
+      omittedScriptPortions: List<String>.unmodifiable(
+        report.omittedScriptPortions,
+      ),
+      addedTranscriptPortions: List<String>.unmodifiable(
+        report.addedTranscriptPortions,
+      ),
+      differentlyDeliveredPortions: List<String>.unmodifiable(
+        report.differentlyDeliveredPortions,
+      ),
       recommendedPosture: report.recommendedPosture,
       isPrototypeData: report.isPrototypeData,
     );
@@ -567,6 +615,19 @@ class HiveRepository {
     }
     _requireNonNegative(session.targetDurationSeconds, 'target duration');
     _requireNonNegative(session.durationSeconds, 'duration');
+    _requireSupportedSpeechType(session.speechType);
+    final requiresScript =
+        session.speechType == 'Prepared' || session.speechType == 'Persuasive';
+    if (requiresScript && speechProfileId == null) {
+      throw StorageException(
+        '${session.speechType} rehearsals require a reference script',
+      );
+    }
+    if (session.speechType == 'Impromptu' && speechProfileId != null) {
+      throw const StorageException(
+        'Impromptu rehearsals must not use a reference script',
+      );
+    }
     if (!requireRelationships) return;
 
     _requireUser(session.userId);
@@ -593,13 +654,19 @@ class HiveRepository {
     }
     if (requireExistingSession) _requireSession(log.sessionId);
     _requireNonNegative(log.occurrenceCount, 'occurrence count');
-    if (log.occurrenceCount != log.detectedTimes.length) {
+    final positions = log.transcriptOffsets.isNotEmpty
+        ? log.transcriptOffsets
+        : log.detectedTimes;
+    if (log.occurrenceCount != positions.length) {
       throw StorageException(
         'Filler log ${log.logId} has an occurrence count that does not match '
-        'its detected times',
+        'its detection positions',
       );
     }
-    if (log.detectedTimes.any((time) => time < 0)) {
+    if ([
+      ...log.detectedTimes,
+      ...log.transcriptOffsets,
+    ].any((time) => time < 0)) {
       throw StorageException(
         'Filler log ${log.logId} contains a negative detection time',
       );
@@ -654,6 +721,14 @@ class HiveRepository {
     }
   }
 
+  void _requireSupportedSpeechType(String speechType) {
+    if (!supportedSpeechTypes.contains(speechType)) {
+      throw StorageException(
+        'Speech type must be Prepared, Persuasive, or Impromptu',
+      );
+    }
+  }
+
   void _requireNonNegative(int value, String field) {
     if (value < 0) throw StorageException('$field cannot be negative');
   }
@@ -670,26 +745,11 @@ class HiveRepository {
     return int.parse(match.group(1)!) * 60;
   }
 
-  int _wordCount(String? transcript) {
-    if (transcript == null || transcript.trim().isEmpty) return 0;
-    return transcript.trim().split(RegExp(r'\s+')).length;
-  }
-
   String _safeIdPart(String value) => value
       .trim()
       .toLowerCase()
       .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
       .replaceAll(RegExp(r'^-+|-+$'), '');
-
-  List<int> _prototypeDetectionTimes(int count, int durationSeconds) {
-    if (count <= 0) return const [];
-    return List<int>.generate(
-      count,
-      (index) => durationSeconds == 0
-          ? 0
-          : ((index + 1) * durationSeconds / (count + 1)).round(),
-    );
-  }
 }
 
 class _PracticeRecords {
@@ -700,7 +760,7 @@ class _PracticeRecords {
     required this.report,
   });
 
-  final SpeechProfile profile;
+  final SpeechProfile? profile;
   final RehearsalSession session;
   final List<FillerWordLog> logs;
   final PerformanceReport report;

@@ -22,13 +22,16 @@ class FillerWordLogAdapter extends TypeAdapter<FillerWordLog> {
       fillerWord: fields[2] as String,
       occurrenceCount: fields[3] as int,
       detectedTimes: (fields[4] as List).cast<int>(),
+      transcriptOffsets: fields[5] == null
+          ? []
+          : (fields[5] as List).cast<int>(),
     );
   }
 
   @override
   void write(BinaryWriter writer, FillerWordLog obj) {
     writer
-      ..writeByte(5)
+      ..writeByte(6)
       ..writeByte(0)
       ..write(obj.logId)
       ..writeByte(1)
@@ -38,7 +41,9 @@ class FillerWordLogAdapter extends TypeAdapter<FillerWordLog> {
       ..writeByte(3)
       ..write(obj.occurrenceCount)
       ..writeByte(4)
-      ..write(obj.detectedTimes);
+      ..write(obj.detectedTimes)
+      ..writeByte(5)
+      ..write(obj.transcriptOffsets);
   }
 
   @override

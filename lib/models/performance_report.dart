@@ -22,6 +22,11 @@ class PerformanceReport {
     required this.fillerCounts,
     required this.recommendedPosture,
     required this.isPrototypeData,
+    this.referenceScript,
+    this.referenceDocumentName,
+    this.omittedScriptPortions = const [],
+    this.addedTranscriptPortions = const [],
+    this.differentlyDeliveredPortions = const [],
   });
 
   @HiveField(0)
@@ -74,4 +79,19 @@ class PerformanceReport {
 
   @HiveField(16)
   final bool isPrototypeData;
+
+  @HiveField(17)
+  final String? referenceScript;
+
+  @HiveField(18)
+  final String? referenceDocumentName;
+
+  @HiveField(19, defaultValue: <String>[])
+  final List<String> omittedScriptPortions;
+
+  @HiveField(20, defaultValue: <String>[])
+  final List<String> addedTranscriptPortions;
+
+  @HiveField(21, defaultValue: <String>[])
+  final List<String> differentlyDeliveredPortions;
 }

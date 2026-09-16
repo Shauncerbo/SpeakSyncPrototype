@@ -34,13 +34,24 @@ class PerformanceReportAdapter extends TypeAdapter<PerformanceReport> {
       fillerCounts: (fields[14] as Map).cast<String, int>(),
       recommendedPosture: fields[15] as String,
       isPrototypeData: fields[16] as bool,
+      referenceScript: fields[17] as String?,
+      referenceDocumentName: fields[18] as String?,
+      omittedScriptPortions: fields[19] == null
+          ? []
+          : (fields[19] as List).cast<String>(),
+      addedTranscriptPortions: fields[20] == null
+          ? []
+          : (fields[20] as List).cast<String>(),
+      differentlyDeliveredPortions: fields[21] == null
+          ? []
+          : (fields[21] as List).cast<String>(),
     );
   }
 
   @override
   void write(BinaryWriter writer, PerformanceReport obj) {
     writer
-      ..writeByte(17)
+      ..writeByte(22)
       ..writeByte(0)
       ..write(obj.reportId)
       ..writeByte(1)
@@ -74,7 +85,17 @@ class PerformanceReportAdapter extends TypeAdapter<PerformanceReport> {
       ..writeByte(15)
       ..write(obj.recommendedPosture)
       ..writeByte(16)
-      ..write(obj.isPrototypeData);
+      ..write(obj.isPrototypeData)
+      ..writeByte(17)
+      ..write(obj.referenceScript)
+      ..writeByte(18)
+      ..write(obj.referenceDocumentName)
+      ..writeByte(19)
+      ..write(obj.omittedScriptPortions)
+      ..writeByte(20)
+      ..write(obj.addedTranscriptPortions)
+      ..writeByte(21)
+      ..write(obj.differentlyDeliveredPortions);
   }
 
   @override

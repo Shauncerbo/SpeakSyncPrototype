@@ -33,12 +33,15 @@ List<PracticeSession> initialSessions() => [
     ],
     textTranscript:
         "Good morning everyone. Today I'm here to talk about climate change. Kuan, it is very important that we address this issue. The global temperatures are rising, and ano, we must act before it is too late.",
+    referenceScript:
+        "Good morning everyone. Today I'm here to talk about climate change. It is important that we address this issue. Global temperatures are rising, and we must act before it is too late.",
+    referenceDocumentName: 'climate-change-speech.txt',
     isPrototypeData: true,
   ),
   PracticeSession(
     id: 'initial-2',
     title: 'Technology and Education',
-    speechType: 'Informative',
+    speechType: 'Prepared',
     languageMode: 'English',
     dateTime: DateTime(2026, 6, 16),
     duration: const Duration(minutes: 5, seconds: 45),
@@ -54,6 +57,9 @@ List<PracticeSession> initialSessions() => [
     ],
     textTranscript:
         "Technology has completely revolutionized education. In the past, um, we relied heavily on textbooks. Now, kuan, students have access to the entire world's knowledge at their fingertips.",
+    referenceScript:
+        "Technology has revolutionized education. In the past, we relied heavily on textbooks. Now students have access to knowledge at their fingertips.",
+    referenceDocumentName: 'technology-and-education.txt',
     isPrototypeData: true,
   ),
   PracticeSession(
@@ -96,6 +102,9 @@ List<PracticeSession> initialSessions() => [
     ],
     textTranscript:
         "Environmental awareness starts at home. Kuan, turning off the lights when leaving a room is simple. Kuan, recycling plastics is also crucial. We need everyone to participate, kuan, to really make a lasting impact.",
+    referenceScript:
+        'Environmental awareness starts at home. Turning off the lights when leaving a room is simple. Recycling plastics is also crucial. We need everyone to participate to make a lasting impact.',
+    referenceDocumentName: 'environmental-awareness.txt',
     isPrototypeData: true,
   ),
 ];

@@ -234,6 +234,172 @@ class InfoBanner extends StatelessWidget {
   }
 }
 
+class ScriptComparisonSummary extends StatelessWidget {
+  const ScriptComparisonSummary({
+    super.key,
+    required this.documentName,
+    required this.omittedPortions,
+    required this.addedPortions,
+    required this.differentlyDeliveredPortions,
+  });
+
+  final String? documentName;
+  final List<String> omittedPortions;
+  final List<String> addedPortions;
+  final List<String> differentlyDeliveredPortions;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasDifferences =
+        omittedPortions.isNotEmpty ||
+        addedPortions.isNotEmpty ||
+        differentlyDeliveredPortions.isNotEmpty;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader('Script comparison'),
+        const SizedBox(height: 6),
+        Text(
+          documentName == null
+              ? 'Compared with the uploaded reference script.'
+              : 'Compared with $documentName.',
+          style: const TextStyle(color: Color(0xFF617085), fontSize: 13),
+        ),
+        const SizedBox(height: 12),
+        const InfoBanner(
+          icon: Icons.rule_rounded,
+          title: 'Delivery comparison only',
+          message:
+              'This checks wording against the reference script. It does not judge whether the content is factually correct or incorrect.',
+          color: accentTeal,
+        ),
+        const SizedBox(height: 12),
+        if (!hasDifferences)
+          const InfoBanner(
+            icon: Icons.check_circle_outline_rounded,
+            title: 'Script closely followed',
+            message:
+                'No meaningful omissions, additions, or wording differences were identified.',
+            color: successGreen,
+          )
+        else ...[
+          _ScriptDifferenceGroup(
+            icon: Icons.remove_circle_outline_rounded,
+            title: 'Omitted from delivery',
+            emptyMessage: 'No omitted portions identified.',
+            portions: omittedPortions,
+            color: warningOrange,
+          ),
+          const SizedBox(height: 10),
+          _ScriptDifferenceGroup(
+            icon: Icons.add_circle_outline_rounded,
+            title: 'Added during delivery',
+            emptyMessage: 'No added portions identified.',
+            portions: addedPortions,
+            color: primaryBlue,
+          ),
+          const SizedBox(height: 10),
+          _ScriptDifferenceGroup(
+            icon: Icons.compare_arrows_rounded,
+            title: 'Delivered differently',
+            emptyMessage: 'No changed portions identified.',
+            portions: differentlyDeliveredPortions,
+            color: accentTeal,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _ScriptDifferenceGroup extends StatelessWidget {
+  const _ScriptDifferenceGroup({
+    required this.icon,
+    required this.title,
+    required this.emptyMessage,
+    required this.portions,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String title;
+  final String emptyMessage;
+  final List<String> portions;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: color, size: 20),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      color: navy,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${portions.length}',
+                  style: TextStyle(color: color, fontWeight: FontWeight.w900),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            if (portions.isEmpty)
+              Text(
+                emptyMessage,
+                style: const TextStyle(color: Color(0xFF617085)),
+              )
+            else
+              ...portions.map(
+                (portion) => Padding(
+                  padding: const EdgeInsets.only(bottom: 9),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 7),
+                        child: Container(
+                          width: 5,
+                          height: 5,
+                          decoration: BoxDecoration(
+                            color: color,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Text(
+                          portion,
+                          style: const TextStyle(
+                            color: Color(0xFF334155),
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class StatusCard extends StatelessWidget {
   const StatusCard({
     super.key,
@@ -242,6 +408,7 @@ class StatusCard extends StatelessWidget {
     required this.status,
     this.isChecking = false,
     this.isPending = false,
+    this.isSuccessful = true,
   });
 
   final IconData icon;
@@ -249,6 +416,7 @@ class StatusCard extends StatelessWidget {
   final String status;
   final bool isChecking;
   final bool isPending;
+  final bool isSuccessful;
 
   @override
   Widget build(BuildContext context) {
@@ -279,9 +447,11 @@ class StatusCard extends StatelessWidget {
                   size: 20,
                 )
               else
-                const Icon(
-                  Icons.check_circle_rounded,
-                  color: successGreen,
+                Icon(
+                  isSuccessful
+                      ? Icons.check_circle_rounded
+                      : Icons.error_outline_rounded,
+                  color: isSuccessful ? successGreen : errorRed,
                   size: 20,
                 ),
               const SizedBox(width: 8),
@@ -289,7 +459,11 @@ class StatusCard extends StatelessWidget {
                 child: Text(
                   status,
                   style: TextStyle(
-                    color: isPending ? const Color(0xFF94A3B8) : successGreen,
+                    color: isPending
+                        ? const Color(0xFF94A3B8)
+                        : isSuccessful
+                        ? successGreen
+                        : errorRed,
                     fontWeight: FontWeight.w700,
                   ),
                   overflow: TextOverflow.ellipsis,

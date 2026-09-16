@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -8,11 +7,20 @@ import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../app.dart';
+import '../core/app_config.dart';
 import '../core/app_theme.dart';
 import '../models/practice_session.dart';
 import '../models/practice_settings.dart';
+import '../services/groq_transcription_service.dart';
+import '../services/filler_analysis.dart';
+import '../services/internet_connectivity_service.dart';
+import '../services/rehearsal_audio_recorder.dart';
+import '../services/script_comparison_service.dart';
+import '../services/speech_document_service.dart';
 import '../state/app_state.dart';
 import '../widgets/common_widgets.dart';
+import '../widgets/speaking_pace_card.dart';
+import '../widgets/filler_frequency_card.dart';
 import 'main_shell.dart';
 
 class PracticeSetupScreen extends StatefulWidget {
@@ -35,13 +43,11 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
   bool _pace = true;
   bool _live = true;
   bool _loadedPreferences = false;
+  bool _isExtractingDocument = false;
+  String? _referenceDocumentName;
+  final _documentService = const SpeechDocumentService();
 
-  static const _speechTypes = [
-    'Prepared',
-    'Impromptu',
-    'Informative',
-    'Persuasive',
-  ];
+  static const _speechTypes = ['Prepared', 'Persuasive', 'Impromptu'];
   static const _languages = [
     'English',
     'English–Filipino',
@@ -83,6 +89,7 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
       speechContent: _speechContentController.text.trim().isEmpty
           ? null
           : _speechContentController.text.trim(),
+      referenceDocumentName: _referenceDocumentName,
       speechType: _speechType!,
       languageMode: _languageMode!,
       selectedDuration: _duration!,
@@ -93,9 +100,62 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
       enableLiveFeedback: _live,
     );
     AppStateScope.of(context, listen: false).setCurrentSetup(settings);
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const DeviceCheckScreen()));
+    final connectivity = AppTimingScope.of(context).internetConnectivity;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => RehearsalScreen(internetConnectivity: connectivity),
+      ),
+    );
+  }
+
+  bool get _requiresReferenceScript =>
+      _speechType == 'Prepared' || _speechType == 'Persuasive';
+
+  void _selectSpeechType(String value) {
+    setState(() {
+      _speechType = value;
+      if (value == 'Impromptu') {
+        _referenceDocumentName = null;
+        _speechContentController.clear();
+      }
+    });
+  }
+
+  Future<void> _chooseSpeechDocument() async {
+    if (_isExtractingDocument) return;
+    setState(() => _isExtractingDocument = true);
+    try {
+      final document = await _documentService.pickAndExtract();
+      if (document == null || !mounted) return;
+      setState(() {
+        _referenceDocumentName = document.fileName;
+        _speechContentController.text = document.text;
+      });
+      _formKey.currentState?.validate();
+    } on SpeechDocumentException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message), backgroundColor: errorRed),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to open the selected speech document.'),
+          backgroundColor: errorRed,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isExtractingDocument = false);
+    }
+  }
+
+  void _removeSpeechDocument() {
+    setState(() {
+      _referenceDocumentName = null;
+      _speechContentController.clear();
+    });
+    _formKey.currentState?.validate();
   }
 
   @override
@@ -145,26 +205,6 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                     },
                   ),
                   const SizedBox(height: 16),
-                  TextFormField(
-                    key: const Key('speech_content'),
-                    controller: _speechContentController,
-                    minLines: 3,
-                    maxLines: 6,
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: const InputDecoration(
-                      labelText: 'Speech content (optional)',
-                      hintText:
-                          'Paste or type your prepared speech script here',
-                      helperText:
-                          'Saved with the speech profile for future reference',
-                      alignLabelWithHint: true,
-                      prefixIcon: Padding(
-                        padding: EdgeInsets.only(bottom: 40),
-                        child: Icon(Icons.description_outlined),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
                   _DropdownField(
                     key: const Key('speech_type'),
                     label: 'Speech type',
@@ -172,8 +212,136 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                     icon: Icons.category_outlined,
                     value: _speechType,
                     items: _speechTypes,
-                    onChanged: (value) => setState(() => _speechType = value),
+                    onChanged: _selectSpeechType,
                   ),
+                  if (_requiresReferenceScript) ...[
+                    const SizedBox(height: 16),
+                    Card(
+                      margin: EdgeInsets.zero,
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Reference script',
+                              style: TextStyle(
+                                color: navy,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            const Text(
+                              'Choose the prepared script you will rehearse. '
+                              'SpeakSync will extract its text for comparison.',
+                              style: TextStyle(
+                                color: Color(0xFF617085),
+                                fontSize: 13,
+                                height: 1.4,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            if (_referenceDocumentName == null)
+                              OutlinedButton.icon(
+                                key: const Key('choose_speech_document'),
+                                onPressed: _isExtractingDocument
+                                    ? null
+                                    : _chooseSpeechDocument,
+                                icon: _isExtractingDocument
+                                    ? const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Icon(Icons.upload_file_rounded),
+                                label: Text(
+                                  _isExtractingDocument
+                                      ? 'Reading document...'
+                                      : 'Choose TXT or DOCX',
+                                ),
+                              )
+                            else
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: accentTeal.withValues(alpha: .08),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: accentTeal.withValues(alpha: .25),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.description_outlined,
+                                      color: accentTeal,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        _referenceDocumentName!,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: navy,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                    IconButton(
+                                      key: const Key('remove_speech_document'),
+                                      tooltip: 'Remove document',
+                                      onPressed: _removeSpeechDocument,
+                                      icon: const Icon(Icons.close_rounded),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            const SizedBox(height: 12),
+                            TextFormField(
+                              key: const Key('speech_content'),
+                              controller: _speechContentController,
+                              minLines: 4,
+                              maxLines: 8,
+                              textCapitalization: TextCapitalization.sentences,
+                              decoration: const InputDecoration(
+                                labelText: 'Extracted script text',
+                                hintText: 'The extracted text appears here',
+                                helperText:
+                                    'You may correct extraction mistakes before continuing.',
+                                alignLabelWithHint: true,
+                              ),
+                              validator: (value) {
+                                if (_referenceDocumentName == null) {
+                                  return 'Please choose your speech document.';
+                                }
+                                if (value == null || value.trim().isEmpty) {
+                                  return 'The reference script cannot be empty.';
+                                }
+                                return null;
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ] else if (_speechType == 'Impromptu') ...[
+                    const SizedBox(height: 12),
+                    const InfoBanner(
+                      icon: Icons.bolt_rounded,
+                      title: 'No script needed',
+                      message:
+                          'Impromptu rehearsal continues without a reference script.',
+                      color: accentTeal,
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   _DropdownField(
                     key: const Key('language_mode'),
@@ -327,7 +495,9 @@ class _DropdownField extends StatelessWidget {
 }
 
 class DeviceCheckScreen extends StatefulWidget {
-  const DeviceCheckScreen({super.key});
+  const DeviceCheckScreen({super.key, this.returnToPreview = false});
+
+  final bool returnToPreview;
 
   @override
   State<DeviceCheckScreen> createState() => _DeviceCheckScreenState();
@@ -336,14 +506,49 @@ class DeviceCheckScreen extends StatefulWidget {
 class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
   bool _checking = false;
   int _activeCheck = -1;
+  InternetConnectivity? _internetConnectivity;
+  StreamSubscription<bool>? _internetSubscription;
+  AppLifecycleListener? _lifecycleListener;
+  bool? _internetAvailable;
+  bool _connectivityInitialized = false;
 
   @override
-  void initState() {
-    super.initState();
-    // Start the checking animation automatically when the screen loads
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_connectivityInitialized) return;
+    _connectivityInitialized = true;
+    _internetConnectivity = AppTimingScope.of(context).internetConnectivity;
+    _lifecycleListener = AppLifecycleListener(
+      onResume: _resumeInternetMonitoring,
+      onPause: _pauseInternetMonitoring,
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _recheck();
+      unawaited(_initializeChecks());
     });
+  }
+
+  Future<void> _initializeChecks() async {
+    await _recheck();
+    if (!mounted) return;
+    _startInternetMonitoring();
+  }
+
+  void _startInternetMonitoring() {
+    if (_internetSubscription != null) return;
+    _internetSubscription = _internetConnectivity!.statusChanges.listen(
+      _handleInternetStatus,
+    );
+  }
+
+  void _pauseInternetMonitoring() {
+    final subscription = _internetSubscription;
+    _internetSubscription = null;
+    if (subscription != null) unawaited(subscription.cancel());
+  }
+
+  void _resumeInternetMonitoring() {
+    _startInternetMonitoring();
+    unawaited(_refreshInternet());
   }
 
   Future<void> _recheck() async {
@@ -353,24 +558,60 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
       _activeCheck = 0;
     });
     final stepDuration = AppTimingScope.of(context).deviceCheckDuration;
-    for (var index = 0; index < 3; index++) {
+    for (var index = 0; index < 2; index++) {
       if (!mounted) return;
       setState(() => _activeCheck = index);
       await Future<void>.delayed(stepDuration);
       if (!mounted) return;
     }
-    if (mounted) {
-      setState(() {
-        _checking = false;
-        _activeCheck = -1;
-      });
+    setState(() => _activeCheck = 2);
+    final available = await _checkInternet();
+    await Future<void>.delayed(stepDuration);
+    if (!mounted) return;
+    setState(() {
+      _internetAvailable = available;
+      _checking = false;
+      _activeCheck = -1;
+    });
+  }
+
+  Future<bool> _checkInternet() async {
+    try {
+      return await _internetConnectivity!.check();
+    } catch (_) {
+      return false;
     }
+  }
+
+  Future<void> _refreshInternet() async {
+    final available = await _checkInternet();
+    if (!mounted) return;
+    _handleInternetStatus(available);
+  }
+
+  void _handleInternetStatus(bool available) {
+    if (!mounted || _internetAvailable == available) return;
+    setState(() => _internetAvailable = available);
   }
 
   String _checkStatus(int index, String readyStatus) {
     if (_checking && _activeCheck == index) return 'Checking...';
     if (_checking && _activeCheck < index) return 'Waiting';
     return readyStatus;
+  }
+
+  String get _internetStatus {
+    if (_checking && _activeCheck == 2) return 'Checking...';
+    if (_checking && _activeCheck < 2) return 'Waiting';
+    if (_internetAvailable == null) return 'Checking...';
+    return _internetAvailable! ? 'Available' : 'Not available';
+  }
+
+  @override
+  void dispose() {
+    _pauseInternetMonitoring();
+    _lifecycleListener?.dispose();
+    super.dispose();
   }
 
   @override
@@ -429,11 +670,16 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
                 ),
                 const SizedBox(height: 10),
                 StatusCard(
-                  icon: Icons.cloud_done_outlined,
+                  icon: _internetAvailable == false
+                      ? Icons.cloud_off_outlined
+                      : Icons.cloud_done_outlined,
                   title: 'Internet for Speech Processing',
-                  status: _checkStatus(2, 'Available'),
-                  isChecking: _checking && _activeCheck == 2,
+                  status: _internetStatus,
+                  isChecking:
+                      (_checking && _activeCheck == 2) ||
+                      (!_checking && _internetAvailable == null),
                   isPending: _checking && _activeCheck < 2,
+                  isSuccessful: _internetAvailable != false,
                 ),
                 const SizedBox(height: 24),
                 const SectionHeader('Before you begin'),
@@ -475,15 +721,28 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
                 const SizedBox(height: 22),
                 FilledButton.icon(
                   key: const Key('start_rehearsal'),
-                  onPressed: setup == null || _checking
+                  onPressed:
+                      setup == null || _checking || _internetAvailable != true
                       ? null
-                      : () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => const RehearsalScreen(),
-                          ),
-                        ),
+                      : () {
+                          if (widget.returnToPreview) {
+                            Navigator.of(context).pop();
+                            return;
+                          }
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => RehearsalScreen(
+                                internetConnectivity: _internetConnectivity,
+                              ),
+                            ),
+                          );
+                        },
                   icon: const Icon(Icons.play_arrow_rounded),
-                  label: const Text('Start Rehearsal'),
+                  label: Text(
+                    widget.returnToPreview
+                        ? 'Back to Preview'
+                        : 'Camera Preview',
+                  ),
                   style: FilledButton.styleFrom(
                     minimumSize: const Size(double.infinity, 54),
                   ),
@@ -539,8 +798,88 @@ class _Instruction extends StatelessWidget {
   }
 }
 
+class _ReadinessCard extends StatelessWidget {
+  const _ReadinessCard({
+    required this.busy,
+    required this.starting,
+    required this.onReady,
+    required this.onDeviceCheck,
+  });
+
+  final bool busy;
+  final bool starting;
+  final VoidCallback onReady;
+  final VoidCallback onDeviceCheck;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('rehearsal_readiness'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFF102A43),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFF294966)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Get comfortable before you begin',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Keep your face and upper body in frame. Adjust your phone, lighting, and posture.',
+            style: TextStyle(color: Color(0xFFBDD0E2), height: 1.5),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Preview only — no recording or monitoring yet.',
+            style: TextStyle(color: accentTeal, fontSize: 12),
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            key: const Key('ready_rehearsal'),
+            onPressed: busy ? null : onReady,
+            style: FilledButton.styleFrom(
+              backgroundColor: accentTeal,
+              foregroundColor: navy,
+              minimumSize: const Size(double.infinity, 52),
+            ),
+            icon: const Icon(Icons.play_arrow_rounded),
+            label: Text(starting ? 'Starting...' : "I'm Ready"),
+          ),
+          Center(
+            child: TextButton(
+              key: const Key('preview_device_check'),
+              onPressed: busy ? null : onDeviceCheck,
+              child: const Text(
+                'Device Check',
+                style: TextStyle(color: Color(0xFFBDD0E2)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class RehearsalScreen extends StatefulWidget {
-  const RehearsalScreen({super.key});
+  const RehearsalScreen({
+    super.key,
+    this.internetConnectivity,
+    this.audioRecorder,
+  });
+
+  final InternetConnectivity? internetConnectivity;
+  final RehearsalAudioRecorder? audioRecorder;
 
   @override
   State<RehearsalScreen> createState() => _RehearsalScreenState();
@@ -549,17 +888,31 @@ class RehearsalScreen extends StatefulWidget {
 class _RehearsalScreenState extends State<RehearsalScreen> {
   Timer? _timer;
   Timer? _alertTimer;
+  Timer? _countdownTimer;
+  int? _countdown;
+  bool _hasStarted = false;
+  bool _starting = false;
+  bool _checkingReadiness = false;
+  int _readinessGeneration = 0;
+  bool _leaving = false;
+  AppLifecycleListener? _readinessLifecycle;
+  late final InternetConnectivity _internetConnectivity;
   int _elapsedSeconds = 0;
   int? _targetDurationSeconds;
   bool _targetDurationLoaded = false;
   bool _thirtySecondWarningShown = false;
   bool _paused = false;
+  bool _restarting = false;
+  bool _changingMicrophone = false;
   bool _recording = false;
   bool _cameraReady = false;
   bool _microphoneEnabled = true;
   bool _cameraEnabled = true;
+  bool _transcribing = false;
   CameraController? _cameraController;
   String _cameraStatus = 'Waiting for camera permission...';
+  String? _audioRecordingError;
+  Future<void>? _audioStartFuture;
   bool _ending = false;
   String _pace = 'Normal';
   String _posture = 'Good';
@@ -567,6 +920,13 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   final Map<String, int> _fillers = {};
   final Map<String, int> _gestureCounts = {};
   final List<String> _transcriptLines = [];
+  late final RehearsalAudioRecorder _audioRecorder;
+  final _microphoneLevel = ValueNotifier<double>(0);
+  StreamSubscription<double>? _levelSubscription;
+  final _transcriptionService = GroqTranscriptionService(
+    apiKey: AppConfig.groqApiKey,
+  );
+  final _scriptComparisonService = const ScriptComparisonService();
   final String _recommendedPosture =
       'Maintain a steady upper-body posture and keep your eyes near the camera.';
   String? _alert;
@@ -588,11 +948,144 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   @override
   void initState() {
     super.initState();
+    _audioRecorder = widget.audioRecorder ?? RehearsalAudioRecorder();
+    _internetConnectivity =
+        widget.internetConnectivity ?? const InternetConnectivityService();
+    _readinessLifecycle = AppLifecycleListener(
+      onInactive: () {
+        if (!_hasStarted && !_starting) _cancelCountdown();
+      },
+    );
+    _prepareCamera();
+  }
+
+  void _cancelCountdown() {
+    _readinessGeneration++;
+    _countdownTimer?.cancel();
+    if (mounted) {
+      setState(() {
+        _countdown = null;
+        _checkingReadiness = false;
+      });
+    }
+  }
+
+  Future<void> _beginCountdown() async {
+    if (_hasStarted || _starting || _checkingReadiness || _countdown != null) {
+      return;
+    }
+    final generation = ++_readinessGeneration;
+    setState(() => _checkingReadiness = true);
+    final online = await _checkInternet();
+    if (!mounted || _leaving || generation != _readinessGeneration) return;
+    setState(() => _checkingReadiness = false);
+    if (!online) {
+      _showAlert(
+        'Internet is unavailable. Reconnect before starting speech processing.',
+        warningOrange,
+        icon: Icons.cloud_off_outlined,
+      );
+      return;
+    }
+    setState(() => _countdown = 3);
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted || _leaving) {
+        timer.cancel();
+        return;
+      }
+      if (_countdown! > 1) {
+        setState(() => _countdown = _countdown! - 1);
+      } else {
+        timer.cancel();
+        setState(() {
+          _countdown = null;
+          _starting = true;
+        });
+        _audioStartFuture = _startAfterCountdown();
+      }
+    });
+  }
+
+  Future<void> _startAfterCountdown() async {
+    await _startAudioRecording();
+    if (!mounted || _leaving) return;
+    setState(() {
+      _elapsedSeconds = 0;
+      _hasStarted = true;
+      _starting = false;
+    });
     _timer = Timer.periodic(
       const Duration(seconds: 1),
       (_) => _handleTimerTick(),
     );
-    _prepareCamera();
+  }
+
+  void _leavePreview() {
+    if (_hasStarted || _leaving) return;
+    _leaving = true;
+    _cancelCountdown();
+    Navigator.of(context).pop();
+  }
+
+  Future<bool> _checkInternet() async {
+    try {
+      return await _internetConnectivity.check();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _startAudioRecording() async {
+    await _levelSubscription?.cancel();
+    _levelSubscription = null;
+    if (!mounted || _leaving) return;
+    _microphoneLevel.value = 0;
+    if (!AppConfig.hasGroqApiKey) {
+      const message = 'Groq transcription is not configured on this device.';
+      if (!mounted) return;
+      setState(() {
+        _recording = false;
+        _audioRecordingError = message;
+      });
+      return;
+    }
+    try {
+      await _audioRecorder.start();
+      if (!mounted || _leaving) return;
+      _levelSubscription = _audioRecorder.levels.listen(
+        (level) {
+          if (!mounted) return;
+          _microphoneLevel.value =
+              _microphoneEnabled && !_ending && !_restarting ? level : 0;
+        },
+        onError: (Object _) {
+          if (mounted) _microphoneLevel.value = 0;
+        },
+        onDone: () {
+          if (mounted) _microphoneLevel.value = 0;
+        },
+      );
+      setState(() {
+        _recording = true;
+        _microphoneEnabled = true;
+        _audioRecordingError = null;
+      });
+    } on AudioRecordingException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _recording = false;
+        _audioRecordingError = error.message;
+      });
+      _showAlert(error.message, errorRed, icon: Icons.mic_off_rounded);
+    } catch (_) {
+      if (!mounted) return;
+      const message = 'SpeakSync could not start microphone recording.';
+      setState(() {
+        _recording = false;
+        _audioRecordingError = message;
+      });
+      _showAlert(message, errorRed, icon: Icons.mic_off_rounded);
+    }
   }
 
   @override
@@ -614,7 +1107,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   }
 
   void _handleTimerTick() {
-    if (!mounted || _paused || _ending) return;
+    if (!mounted || !_hasStarted || _paused || _ending) return;
     final target = _targetDurationSeconds;
     setState(() {
       _elapsedSeconds++;
@@ -656,7 +1149,11 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       _alertIcon = icon;
     });
     _alertTimer = Timer(const Duration(milliseconds: 2400), () {
-      if (mounted) setState(() => _alert = null);
+      if (mounted) {
+        setState(() {
+          _alert = null;
+        });
+      }
     });
   }
 
@@ -697,19 +1194,18 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   }
 
   Future<void> _prepareCamera() async {
-    final cameraStatus = await Permission.camera.request();
-    if (!mounted) return;
-
-    if (!cameraStatus.isGranted) {
-      setState(() {
-        _cameraReady = false;
-        _cameraStatus = 'Camera access is required to record rehearsal video.';
-      });
-      return;
-    }
-
     try {
+      final cameraStatus = await Permission.camera.request();
+      if (!mounted || _leaving) return;
+      if (!cameraStatus.isGranted) {
+        setState(() {
+          _cameraReady = false;
+          _cameraStatus = 'Allow camera access to check your framing.';
+        });
+        return;
+      }
       final cameras = await availableCameras();
+      if (!mounted || _leaving) return;
       if (cameras.isEmpty) {
         setState(() {
           _cameraReady = false;
@@ -726,9 +1222,10 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       _cameraController = CameraController(
         selectedCamera,
         ResolutionPreset.max,
-        enableAudio: true,
+        enableAudio: false,
       );
       await _cameraController!.initialize();
+      if (!mounted || _leaving) return;
 
       // Use the widest view supported by the device so the speaker can keep
       // their head, hands, and waist visible during rehearsal.
@@ -747,6 +1244,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       });
     } catch (e) {
       debugPrint('Camera initialization error: $e');
+      if (!mounted || _leaving) return;
       setState(() {
         _cameraReady = false;
         _cameraStatus = 'Unable to initialize camera. Error: $e';
@@ -790,8 +1288,160 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     setState(() => _recording = !_recording);
   }
 
-  void _toggleMicrophone() {
-    setState(() => _microphoneEnabled = !_microphoneEnabled);
+  Future<void> _toggleMicrophone() async {
+    if (!_hasStarted || _restarting || _ending || _changingMicrophone) return;
+    setState(() => _changingMicrophone = true);
+    try {
+      await _audioStartFuture;
+      if (!mounted) return;
+      await _changeMicrophone();
+    } finally {
+      if (mounted) setState(() => _changingMicrophone = false);
+    }
+  }
+
+  Future<void> _changeMicrophone() async {
+    if (!_audioRecorder.hasStarted) {
+      _audioStartFuture = _startAudioRecording();
+      await _audioStartFuture;
+      return;
+    }
+    try {
+      if (_microphoneEnabled) {
+        await _audioRecorder.pause();
+        if (mounted) _microphoneLevel.value = 0;
+      } else {
+        await _audioRecorder.resume();
+      }
+      if (mounted) {
+        setState(() {
+          _microphoneEnabled = !_microphoneEnabled;
+          _recording = _microphoneEnabled;
+        });
+      }
+    } catch (_) {
+      _showAlert(
+        'Unable to change the microphone state.',
+        errorRed,
+        icon: Icons.mic_off_rounded,
+      );
+    }
+  }
+
+  Future<void> _confirmRestart() async {
+    if (!_hasStarted ||
+        _restarting ||
+        _ending ||
+        _changingMicrophone ||
+        _paused) {
+      return;
+    }
+    setState(() {
+      _restarting = true;
+      _paused = true;
+    });
+    var resumeRecording = false;
+    try {
+      await _audioStartFuture;
+      if (!mounted) return;
+      // Keep recorded audio and rehearsal time aligned during confirmation.
+      if (_microphoneEnabled && _audioRecorder.hasStarted) {
+        await _audioRecorder.pause();
+        resumeRecording = true;
+      }
+      if (!mounted) return;
+      _microphoneLevel.value = 0;
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Restart Session'),
+          content: const Text(
+            'Are you sure you want to restart? Your current progress will be lost.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              key: const Key('confirm_restart_session'),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Restart'),
+            ),
+          ],
+        ),
+      );
+      if (confirm != true || !mounted) return;
+      resumeRecording = false;
+      // Track the whole operation so disposal also waits for stop/start.
+      _audioStartFuture = _restartRehearsal().catchError((Object _) {
+        if (!mounted) return;
+        const message = 'Unable to restart the microphone. Please try again.';
+        setState(() {
+          _recording = false;
+          _audioRecordingError = message;
+        });
+        _showAlert(message, errorRed, icon: Icons.mic_off_rounded);
+      });
+      await _audioStartFuture;
+    } catch (_) {
+      if (mounted) {
+        _showAlert(
+          'Unable to restart the microphone. Please try again.',
+          errorRed,
+          icon: Icons.mic_off_rounded,
+        );
+      }
+    } finally {
+      if (resumeRecording && mounted && _audioRecorder.hasStarted) {
+        try {
+          await _audioRecorder.resume();
+        } catch (_) {
+          if (mounted) {
+            _showAlert(
+              'Unable to resume the microphone. Please try again.',
+              errorRed,
+              icon: Icons.mic_off_rounded,
+            );
+          }
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _restarting = false;
+          _paused = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _restartRehearsal() async {
+    _microphoneLevel.value = 0;
+    await _levelSubscription?.cancel();
+    _levelSubscription = null;
+    await _audioRecorder.discard();
+    if (!mounted) return;
+    _alertTimer?.cancel();
+    setState(() {
+      _elapsedSeconds = 0;
+      _fillers.clear();
+      _gestureCounts.clear();
+      _transcriptLines.clear();
+      _pace = 'Normal';
+      _posture = 'Good';
+      _attention = 82;
+      _thirtySecondWarningShown = false;
+      _alert = null;
+      _recording = false;
+    });
+    await _startAudioRecording();
+    if (!mounted) return;
+    // Give the new attempt a full first second, independent of the old timer.
+    _timer?.cancel();
+    _timer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => _handleTimerTick(),
+    );
   }
 
   Future<void> _toggleCamera() async {
@@ -860,7 +1510,11 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   }
 
   Future<void> _confirmEnd() async {
-    if (_ending) return;
+    if (!_hasStarted) {
+      _leavePreview();
+      return;
+    }
+    if (_ending || _restarting || _changingMicrophone || _paused) return;
     setState(() => _paused = true);
     final shouldEnd = await showDialog<bool>(
       context: context,
@@ -890,10 +1544,12 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   }
 
   Future<void> _finishRehearsal() async {
-    if (_ending) return;
+    if (!_hasStarted || _ending) return;
     _ending = true;
+    _microphoneLevel.value = 0;
     _timer?.cancel();
-    if (_recording && _cameraController != null) {
+    if (mounted) setState(() => _transcribing = true);
+    if (_cameraController?.value.isRecordingVideo == true) {
       try {
         await _cameraController!.stopVideoRecording();
       } catch (_) {
@@ -904,6 +1560,51 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     final state = AppStateScope.of(context, listen: false);
     final setup = state.currentSetup!;
     final overall = _calculateOverall();
+    String? audioPath;
+    String? transcript;
+    String? transcriptionError;
+    try {
+      await _audioStartFuture;
+      if (!_audioRecorder.hasStarted) {
+        throw AudioRecordingException(
+          _audioRecordingError ?? 'No rehearsal audio was recorded.',
+        );
+      }
+      audioPath = await _audioRecorder.stop();
+      if (audioPath == null || audioPath.trim().isEmpty) {
+        throw const AudioRecordingException('No rehearsal audio was recorded.');
+      }
+      if (!await _checkInternet()) {
+        throw const TranscriptionException(
+          TranscriptionFailureType.noInternet,
+          'No internet connection was available for transcription.',
+        );
+      }
+      transcript = await _transcriptionService.transcribe(audioPath);
+    } on AudioRecordingException catch (error) {
+      transcriptionError = error.message;
+    } on TranscriptionException catch (error) {
+      transcriptionError = error.message;
+    } catch (_) {
+      transcriptionError =
+          'Transcription failed. The rehearsal report can still continue.';
+    } finally {
+      await _audioRecorder.deleteTemporaryFile(audioPath);
+    }
+    if (!mounted) return;
+    final referenceScript = setup.speechContent?.trim();
+    final shouldCompareScript =
+        (setup.speechType == 'Prepared' || setup.speechType == 'Persuasive') &&
+        referenceScript != null &&
+        referenceScript.isNotEmpty &&
+        transcript != null &&
+        transcript.isNotEmpty;
+    final comparison = shouldCompareScript
+        ? _scriptComparisonService.compare(
+            referenceScript: referenceScript,
+            transcript: transcript,
+          )
+        : null;
     final session = PracticeSession(
       id: 'session-${DateTime.now().microsecondsSinceEpoch}',
       title: setup.speechTitle,
@@ -916,11 +1617,20 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       fillerScore: (100 - _fillerTotal * 7).clamp(0, 100),
       postureScore: _posture == 'Good' ? 95 : 72,
       attentionScore: _attention,
-      fillerCounts: Map.unmodifiable(_fillers),
+      fillerCounts: FillerAnalysis.fromTranscript(
+        transcript,
+        Duration(seconds: _elapsedSeconds),
+      ).counts,
       coachingTips: _buildTips(),
-      textTranscript: _transcriptLines.isNotEmpty
-          ? _transcriptLines.join(' ')
-          : _transcriptSamples.join(' '),
+      textTranscript: transcript,
+      referenceScript: shouldCompareScript ? referenceScript : null,
+      referenceDocumentName: shouldCompareScript
+          ? setup.referenceDocumentName
+          : null,
+      omittedScriptPortions: comparison?.omittedPortions ?? const [],
+      addedTranscriptPortions: comparison?.addedPortions ?? const [],
+      differentlyDeliveredPortions:
+          comparison?.differentlyDeliveredPortions ?? const [],
       transcriptLines: List.unmodifiable(_transcriptLines),
       gestureCounts: Map.unmodifiable(_gestureCounts),
       recommendedPosture: _recommendedPosture,
@@ -929,7 +1639,10 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     state.setCurrentReport(session);
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(builder: (_) => const AnalyzingScreen()),
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            AnalyzingScreen(transcriptionErrorMessage: transcriptionError),
+      ),
     );
   }
 
@@ -975,8 +1688,20 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   void dispose() {
     _timer?.cancel();
     _alertTimer?.cancel();
+    _countdownTimer?.cancel();
+    _readinessLifecycle?.dispose();
+    _levelSubscription?.cancel();
+    _microphoneLevel.dispose();
     _cameraController?.dispose();
+    unawaited(_disposeAudioRecorder());
+    _transcriptionService.dispose();
     super.dispose();
+  }
+
+  Future<void> _disposeAudioRecorder() async {
+    await _audioStartFuture;
+    if (_audioRecorder.hasStarted) await _audioRecorder.cancel();
+    await _audioRecorder.dispose();
   }
 
   @override
@@ -986,8 +1711,13 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     final minutes = (displayedSeconds ~/ 60).toString().padLeft(2, '0');
     final seconds = (displayedSeconds % 60).toString().padLeft(2, '0');
     return PopScope(
-      canPop: false,
+      canPop: !_hasStarted,
       onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          _leaving = true;
+          _countdownTimer?.cancel();
+          return;
+        }
         if (!didPop) _confirmEnd();
       },
       child: Scaffold(
@@ -996,12 +1726,19 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
           backgroundColor: const Color(0xFF071526),
           foregroundColor: Colors.white,
           automaticallyImplyLeading: false,
+          leading: !_hasStarted
+              ? IconButton(
+                  key: const Key('leave_readiness'),
+                  onPressed: _leavePreview,
+                  icon: const Icon(Icons.arrow_back_rounded),
+                )
+              : null,
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Rehearsal',
-                style: TextStyle(fontSize: 13, color: Color(0xFF9EB1C7)),
+              Text(
+                _hasStarted ? 'Rehearsal' : 'Camera Preview',
+                style: const TextStyle(fontSize: 13, color: Color(0xFF9EB1C7)),
               ),
               Text(
                 setup.speechTitle,
@@ -1015,308 +1752,418 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
             ],
           ),
           actions: [
-            Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: Center(
-                child: Text(
-                  '$minutes:$seconds',
-                  key: const Key('rehearsal_timer'),
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    fontFeatures: [FontFeature.tabularFigures()],
+            if (_hasStarted)
+              Padding(
+                padding: const EdgeInsets.only(right: 16),
+                child: Center(
+                  child: Text(
+                    '$minutes:$seconds',
+                    key: const Key('rehearsal_timer'),
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        body: Stack(
+          children: [
+            SafeArea(
+              child: SingleChildScrollView(
+                child: PageFrame(
+                  maxWidth: 760,
+                  child: Column(
+                    children: [
+                      Stack(
+                        clipBehavior: Clip.none,
+                        alignment: Alignment.bottomCenter,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 28),
+                            child: _CameraStage(
+                              controller: _cameraController,
+                              cameraReady: _cameraReady,
+                              cameraEnabled: _cameraEnabled,
+                              cameraStatus: _cameraStatus,
+                              recording:
+                                  _hasStarted &&
+                                  _recording &&
+                                  !_restarting &&
+                                  !_ending,
+                            ),
+                          ),
+                          if (_alert != null &&
+                              (!_hasStarted || setup.enableLiveFeedback))
+                            Positioned(
+                              top: 12,
+                              left: 12,
+                              right: 12,
+                              child: Center(
+                                child: AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 180),
+                                  child: Container(
+                                    key: ValueKey(_alert),
+                                    width: double.infinity,
+                                    constraints: const BoxConstraints(
+                                      maxWidth: 360,
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xE61A2938),
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(
+                                        color: _alertColor.withValues(
+                                          alpha: .55,
+                                        ),
+                                      ),
+                                      boxShadow: const [
+                                        BoxShadow(
+                                          color: Color(0x33000000),
+                                          blurRadius: 8,
+                                          offset: Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          _alertIcon,
+                                          color: _alertColor,
+                                          size: 17,
+                                        ),
+                                        const SizedBox(width: 7),
+                                        Flexible(
+                                          child: Text(
+                                            _alert!,
+                                            maxLines: 2,
+                                            softWrap: true,
+                                            overflow: TextOverflow.visible,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (_hasStarted)
+                            Positioned(
+                              left: 12,
+                              bottom: 48,
+                              child: ValueListenableBuilder<double>(
+                                valueListenable: _microphoneLevel,
+                                builder: (context, level, child) =>
+                                    _MicrophoneLevelIndicator(
+                                      enabled:
+                                          _microphoneEnabled &&
+                                          _audioRecorder.hasStarted &&
+                                          !_ending,
+                                      level: level,
+                                    ),
+                              ),
+                            ),
+                          if (_hasStarted)
+                            Positioned(
+                              bottom: 0,
+                              child: _MediaControls(
+                                microphoneEnabled: _microphoneEnabled,
+                                cameraEnabled: _cameraEnabled,
+                                onMicrophonePressed: _toggleMicrophone,
+                                onCameraPressed: _toggleCamera,
+                              ),
+                            ),
+                        ],
+                      ),
+                      if (!_hasStarted) ...[
+                        _ReadinessCard(
+                          busy:
+                              _starting ||
+                              _checkingReadiness ||
+                              _countdown != null,
+                          starting: _starting,
+                          onReady: _beginCountdown,
+                          onDeviceCheck: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const DeviceCheckScreen(
+                                returnToPreview: true,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (_hasStarted) ...[
+                        const SizedBox(height: 10),
+                        if (setup.enableLiveFeedback) ...[
+                          Container(
+                            key: const Key('prototype_alert_controls'),
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF10243A),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: const Color(0xFF29435E),
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Test live alerts',
+                                  style: TextStyle(
+                                    color: Color(0xFFB9C9D9),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    if (setup.monitorBodyLanguage)
+                                      _AlertTestButton(
+                                        key: const Key('test_posture_alert'),
+                                        icon: Icons.accessibility_new_rounded,
+                                        label: 'Posture',
+                                        onPressed: _simulatePostureAlert,
+                                      ),
+                                    if (setup.monitorCameraAttention)
+                                      _AlertTestButton(
+                                        key: const Key('test_camera_alert'),
+                                        icon: Icons.visibility_outlined,
+                                        label: 'Camera gaze',
+                                        onPressed:
+                                            _simulateCameraAttentionAlert,
+                                      ),
+                                    if (setup.monitorFillers)
+                                      _AlertTestButton(
+                                        key: const Key('test_filler_alert'),
+                                        icon: Icons.chat_bubble_outline_rounded,
+                                        label: 'Filler word',
+                                        onPressed: _simulateFillerAlert,
+                                      ),
+                                    if (setup.monitorPace)
+                                      _AlertTestButton(
+                                        key: const Key(
+                                          'test_fast_speech_alert',
+                                        ),
+                                        icon: Icons.speed_rounded,
+                                        label: 'Fast speech',
+                                        onPressed: _simulateFastSpeechAlert,
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+                        GridView.count(
+                          crossAxisCount: 2,
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          mainAxisSpacing: 10,
+                          crossAxisSpacing: 10,
+                          childAspectRatio: 1.35,
+                          children: [
+                            _LiveMetric(
+                              label: 'Speaking Pace',
+                              value: setup.monitorPace ? _pace : 'Off',
+                              icon: Icons.speed_rounded,
+                              good: _pace == 'Normal',
+                              enabled: setup.monitorPace,
+                              progress: _pace == 'Normal' ? .82 : .42,
+                              description: _pace == 'Normal'
+                                  ? 'Good speaking rhythm'
+                                  : 'Slow down slightly',
+                            ),
+                            _LiveMetric(
+                              label: 'Posture',
+                              value: setup.monitorBodyLanguage
+                                  ? _posture
+                                  : 'Off',
+                              icon: Icons.accessibility_new_rounded,
+                              good: _posture == 'Good',
+                              enabled: setup.monitorBodyLanguage,
+                              progress: _posture == 'Good' ? .9 : .48,
+                              description: _posture == 'Good'
+                                  ? 'Upper body is steady'
+                                  : 'Straighten your posture',
+                            ),
+                            _LiveMetric(
+                              label: 'Camera Attention',
+                              value: setup.monitorCameraAttention
+                                  ? '$_attention%'
+                                  : 'Off',
+                              icon: Icons.center_focus_strong,
+                              good: _attention >= 70,
+                              enabled: setup.monitorCameraAttention,
+                              progress: _attention / 100,
+                              description: _attention >= 70
+                                  ? 'Strong camera focus'
+                                  : 'Look toward the camera',
+                            ),
+                            _LiveMetric(
+                              key: const Key('filler_metric'),
+                              label: 'Fillers Detected',
+                              value: setup.monitorFillers
+                                  ? '$_fillerTotal'
+                                  : 'Off',
+                              icon: Icons.chat_bubble_outline,
+                              good: _fillerTotal == 0,
+                              enabled: setup.monitorFillers,
+                              progress: (1 - (_fillerTotal / 8)).clamp(0, 1),
+                              description: _fillerTotal == 0
+                                  ? 'No fillers detected'
+                                  : 'Try a quiet pause',
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                key: const Key('restart_session'),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.white,
+                                  side: const BorderSide(
+                                    color: Color(0xFF57718C),
+                                  ),
+                                ),
+                                onPressed:
+                                    _restarting ||
+                                        _ending ||
+                                        _changingMicrophone
+                                    ? null
+                                    : _confirmRestart,
+                                icon: const Icon(Icons.refresh_rounded),
+                                label: Text(
+                                  _restarting ? 'Restarting...' : 'Restart',
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: FilledButton.icon(
+                                key: const Key('end_session'),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: errorRed,
+                                ),
+                                onPressed:
+                                    _restarting ||
+                                        _ending ||
+                                        _changingMicrophone
+                                    ? null
+                                    : _confirmEnd,
+                                icon: const Icon(Icons.stop_rounded),
+                                label: const Text('End Session'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ),
             ),
-          ],
-        ),
-        body: SafeArea(
-          child: SingleChildScrollView(
-            child: PageFrame(
-              maxWidth: 760,
-              child: Column(
-                children: [
-                  Stack(
-                    clipBehavior: Clip.none,
-                    alignment: Alignment.bottomCenter,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 28),
-                        child: _CameraStage(
-                          controller: _cameraController,
-                          cameraReady: _cameraReady,
-                          cameraEnabled: _cameraEnabled,
-                          cameraStatus: _cameraStatus,
+            if (_countdown != null)
+              Positioned.fill(
+                child: ColoredBox(
+                  color: const Color(0x99071526),
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Get ready',
+                          style: TextStyle(color: Colors.white, fontSize: 22),
                         ),
-                      ),
-                      if (_alert != null && setup.enableLiveFeedback)
-                        Positioned(
-                          top: 12,
-                          left: 12,
-                          right: 12,
-                          child: Center(
-                            child: AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 180),
-                              child: Container(
-                                key: ValueKey(_alert),
-                                width: double.infinity,
-                                constraints: const BoxConstraints(
-                                  maxWidth: 360,
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xE61A2938),
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(
-                                    color: _alertColor.withValues(alpha: .55),
-                                  ),
-                                  boxShadow: const [
-                                    BoxShadow(
-                                      color: Color(0x33000000),
-                                      blurRadius: 8,
-                                      offset: Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      _alertIcon,
-                                      color: _alertColor,
-                                      size: 17,
-                                    ),
-                                    const SizedBox(width: 7),
-                                    Flexible(
-                                      child: Text(
-                                        _alert!,
-                                        maxLines: 2,
-                                        softWrap: true,
-                                        overflow: TextOverflow.visible,
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
+                        Semantics(
+                          liveRegion: true,
+                          child: Text(
+                            '$_countdown',
+                            key: const Key('readiness_countdown'),
+                            style: const TextStyle(
+                              color: accentTeal,
+                              fontSize: 88,
+                              fontWeight: FontWeight.w900,
                             ),
                           ),
                         ),
-                      Positioned(
-                        left: 12,
-                        bottom: 48,
-                        child: _MicrophoneLevelIndicator(
-                          enabled: _microphoneEnabled,
+                        TextButton(
+                          key: const Key('cancel_countdown'),
+                          onPressed: _cancelCountdown,
+                          child: const Text(
+                            'Cancel',
+                            style: TextStyle(color: Colors.white),
+                          ),
                         ),
-                      ),
-                      Positioned(
-                        bottom: 0,
-                        child: _MediaControls(
-                          microphoneEnabled: _microphoneEnabled,
-                          cameraEnabled: _cameraEnabled,
-                          onMicrophonePressed: _toggleMicrophone,
-                          onCameraPressed: _toggleCamera,
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 10),
-                  if (setup.enableLiveFeedback) ...[
-                    Container(
-                      key: const Key('prototype_alert_controls'),
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
+                ),
+              ),
+            if (_transcribing)
+              Positioned.fill(
+                child: ColoredBox(
+                  color: const Color(0xD9071526),
+                  child: Center(
+                    child: Container(
+                      key: const Key('transcribing_rehearsal'),
+                      margin: const EdgeInsets.all(28),
+                      constraints: const BoxConstraints(maxWidth: 360),
+                      padding: const EdgeInsets.all(24),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF10243A),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFF29435E)),
+                        color: const Color(0xFF102A43),
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(color: const Color(0xFF2D5678)),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      child: const Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Text(
-                            'Test live alerts',
+                          CircularProgressIndicator(color: accentTeal),
+                          SizedBox(height: 20),
+                          Text(
+                            'Transcribing rehearsal...',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            'Keep this screen open while SpeakSync processes your audio.',
+                            textAlign: TextAlign.center,
                             style: TextStyle(
                               color: Color(0xFFB9C9D9),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
+                              height: 1.4,
                             ),
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              if (setup.monitorBodyLanguage)
-                                _AlertTestButton(
-                                  key: const Key('test_posture_alert'),
-                                  icon: Icons.accessibility_new_rounded,
-                                  label: 'Posture',
-                                  onPressed: _simulatePostureAlert,
-                                ),
-                              if (setup.monitorCameraAttention)
-                                _AlertTestButton(
-                                  key: const Key('test_camera_alert'),
-                                  icon: Icons.visibility_outlined,
-                                  label: 'Camera gaze',
-                                  onPressed: _simulateCameraAttentionAlert,
-                                ),
-                              if (setup.monitorFillers)
-                                _AlertTestButton(
-                                  key: const Key('test_filler_alert'),
-                                  icon: Icons.chat_bubble_outline_rounded,
-                                  label: 'Filler word',
-                                  onPressed: _simulateFillerAlert,
-                                ),
-                              if (setup.monitorPace)
-                                _AlertTestButton(
-                                  key: const Key('test_fast_speech_alert'),
-                                  icon: Icons.speed_rounded,
-                                  label: 'Fast speech',
-                                  onPressed: _simulateFastSpeechAlert,
-                                ),
-                            ],
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 12),
-                  ],
-                  GridView.count(
-                    crossAxisCount: 2,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                    childAspectRatio: 1.35,
-                    children: [
-                      _LiveMetric(
-                        label: 'Speaking Pace',
-                        value: setup.monitorPace ? _pace : 'Off',
-                        icon: Icons.speed_rounded,
-                        good: _pace == 'Normal',
-                        enabled: setup.monitorPace,
-                        progress: _pace == 'Normal' ? .82 : .42,
-                        description: _pace == 'Normal'
-                            ? 'Good speaking rhythm'
-                            : 'Slow down slightly',
-                      ),
-                      _LiveMetric(
-                        label: 'Posture',
-                        value: setup.monitorBodyLanguage ? _posture : 'Off',
-                        icon: Icons.accessibility_new_rounded,
-                        good: _posture == 'Good',
-                        enabled: setup.monitorBodyLanguage,
-                        progress: _posture == 'Good' ? .9 : .48,
-                        description: _posture == 'Good'
-                            ? 'Upper body is steady'
-                            : 'Straighten your posture',
-                      ),
-                      _LiveMetric(
-                        label: 'Camera Attention',
-                        value: setup.monitorCameraAttention
-                            ? '$_attention%'
-                            : 'Off',
-                        icon: Icons.center_focus_strong,
-                        good: _attention >= 70,
-                        enabled: setup.monitorCameraAttention,
-                        progress: _attention / 100,
-                        description: _attention >= 70
-                            ? 'Strong camera focus'
-                            : 'Look toward the camera',
-                      ),
-                      _LiveMetric(
-                        key: const Key('filler_metric'),
-                        label: 'Fillers Detected',
-                        value: setup.monitorFillers ? '$_fillerTotal' : 'Off',
-                        icon: Icons.chat_bubble_outline,
-                        good: _fillerTotal == 0,
-                        enabled: setup.monitorFillers,
-                        progress: (1 - (_fillerTotal / 8)).clamp(0, 1),
-                        description: _fillerTotal == 0
-                            ? 'No fillers detected'
-                            : 'Try a quiet pause',
-                      ),
-                    ],
                   ),
-
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          key: const Key('restart_session'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            side: const BorderSide(color: Color(0xFF57718C)),
-                          ),
-                          onPressed: () async {
-                            final confirm = await showDialog<bool>(
-                              context: context,
-                              builder: (context) => AlertDialog(
-                                title: const Text('Restart Session'),
-                                content: const Text(
-                                  'Are you sure you want to restart? Your current progress will be lost.',
-                                ),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () =>
-                                        Navigator.of(context).pop(false),
-                                    child: const Text('Cancel'),
-                                  ),
-                                  TextButton(
-                                    onPressed: () =>
-                                        Navigator.of(context).pop(true),
-                                    child: const Text('Restart'),
-                                  ),
-                                ],
-                              ),
-                            );
-                            if (confirm == true && mounted) {
-                              setState(() {
-                                _elapsedSeconds = 0;
-                                _fillers.clear();
-                                _gestureCounts.clear();
-                                _transcriptLines.clear();
-                                _pace = 'Normal';
-                                _posture = 'Good';
-                                _attention = 82;
-                                _paused = false;
-                                _thirtySecondWarningShown = false;
-                                _alert = null;
-                              });
-                            }
-                          },
-                          icon: const Icon(Icons.refresh_rounded),
-                          label: const Text('Restart'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: FilledButton.icon(
-                          key: const Key('end_session'),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: errorRed,
-                          ),
-                          onPressed: _confirmEnd,
-                          icon: const Icon(Icons.stop_rounded),
-                          label: const Text('End Session'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+                ),
               ),
-            ),
-          ),
+          ],
         ),
       ),
     );
@@ -1329,12 +2176,14 @@ class _CameraStage extends StatelessWidget {
     required this.cameraReady,
     required this.cameraEnabled,
     required this.cameraStatus,
+    required this.recording,
   });
 
   final CameraController? controller;
   final bool cameraReady;
   final bool cameraEnabled;
   final String cameraStatus;
+  final bool recording;
 
   @override
   Widget build(BuildContext context) {
@@ -1365,7 +2214,11 @@ class _CameraStage extends StatelessWidget {
               child: cameraFeed,
             ),
           );
-          return _buildFrame(aspectRatio: 9 / 16, preview: portraitPreview);
+          return _buildFrame(
+            aspectRatio: 9 / 16,
+            preview: portraitPreview,
+            showRecordingBadge: recording,
+          );
         },
       );
     }
@@ -1531,52 +2384,17 @@ class _CameraOffView extends StatelessWidget {
   }
 }
 
-class _MicrophoneLevelIndicator extends StatefulWidget {
-  const _MicrophoneLevelIndicator({required this.enabled});
+class _MicrophoneLevelIndicator extends StatelessWidget {
+  const _MicrophoneLevelIndicator({required this.enabled, required this.level});
 
   final bool enabled;
-
-  @override
-  State<_MicrophoneLevelIndicator> createState() =>
-      _MicrophoneLevelIndicatorState();
-}
-
-class _MicrophoneLevelIndicatorState extends State<_MicrophoneLevelIndicator>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 900),
-  );
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.enabled) _controller.repeat();
-  }
-
-  @override
-  void didUpdateWidget(covariant _MicrophoneLevelIndicator oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.enabled == oldWidget.enabled) return;
-    if (widget.enabled) {
-      _controller.repeat();
-    } else {
-      _controller.stop();
-      _controller.value = 0;
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+  final double level;
 
   @override
   Widget build(BuildContext context) {
-    final color = widget.enabled ? successGreen : const Color(0xFF8A99A8);
+    final color = enabled ? successGreen : const Color(0xFF8A99A8);
     return Semantics(
-      label: widget.enabled ? 'Microphone active' : 'Microphone muted',
+      label: enabled ? 'Microphone active' : 'Microphone inactive',
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         decoration: BoxDecoration(
@@ -1588,24 +2406,22 @@ class _MicrophoneLevelIndicatorState extends State<_MicrophoneLevelIndicator>
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              widget.enabled ? Icons.mic_rounded : Icons.mic_off_rounded,
+              enabled ? Icons.mic_rounded : Icons.mic_off_rounded,
               color: color,
               size: 15,
             ),
             const SizedBox(width: 6),
-            AnimatedBuilder(
-              animation: _controller,
-              builder: (context, child) => Row(
+            SizedBox(
+              height: 16,
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: List.generate(5, (index) {
-                  final movement = widget.enabled
-                      ? math
-                            .sin(
-                              (_controller.value * math.pi * 2) + (index * .9),
-                            )
-                            .abs()
+                  // A volume meter: each bar has a higher input threshold.
+                  final movement = enabled
+                      ? (level * 5 - index).clamp(0.0, 1.0)
                       : 0.0;
-                  return Container(
+                  return AnimatedContainer(
+                    duration: const Duration(milliseconds: 80),
                     width: 2.5,
                     height: 4 + (movement * 12),
                     margin: const EdgeInsets.symmetric(horizontal: 1.2),
@@ -1619,7 +2435,7 @@ class _MicrophoneLevelIndicatorState extends State<_MicrophoneLevelIndicator>
             ),
             const SizedBox(width: 6),
             Text(
-              widget.enabled ? 'Mic active' : 'Muted',
+              enabled ? 'Mic active' : 'Mic off',
               style: TextStyle(
                 color: color,
                 fontSize: 11,
@@ -1861,7 +2677,9 @@ class _LiveMetric extends StatelessWidget {
 }
 
 class AnalyzingScreen extends StatefulWidget {
-  const AnalyzingScreen({super.key});
+  const AnalyzingScreen({super.key, this.transcriptionErrorMessage});
+
+  final String? transcriptionErrorMessage;
 
   @override
   State<AnalyzingScreen> createState() => _AnalyzingScreenState();
@@ -1932,6 +2750,15 @@ class _AnalyzingScreenState extends State<AnalyzingScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
+                  if (widget.transcriptionErrorMessage != null) ...[
+                    InfoBanner(
+                      icon: Icons.warning_amber_rounded,
+                      title: 'Transcript unavailable',
+                      message: widget.transcriptionErrorMessage!,
+                      color: warningOrange,
+                    ),
+                    const SizedBox(height: 20),
+                  ],
                   const Text(
                     'SIMULATED ANALYSIS',
                     style: TextStyle(
@@ -2019,7 +2846,8 @@ class _ReportScreenState extends State<ReportScreen> {
         ),
       );
     }
-    final fillers = report.fillerCounts.entries
+    final fillerAnalysis = report.fillerAnalysis;
+    final fillers = fillerAnalysis.counts.entries
         .where((entry) => entry.value > 0)
         .toList();
     return Scaffold(
@@ -2087,20 +2915,9 @@ class _ReportScreenState extends State<ReportScreen> {
                 const SizedBox(height: 30),
                 const SectionHeader('Delivery breakdown'),
                 const SizedBox(height: 12),
-                _ScoreRow(
-                  icon: Icons.speed_rounded,
-                  label: 'Pace',
-                  score: report.paceScore,
-                  status: report.paceScore >= 80 ? 'Normal' : 'Too Fast',
-                ),
+                SpeakingPaceCard(pace: report.speakingPace),
                 const SizedBox(height: 10),
-                _ScoreRow(
-                  icon: Icons.chat_bubble_outline,
-                  label: 'Filler Control',
-                  score: report.fillerScore,
-                  status:
-                      '${fillers.fold<int>(0, (s, e) => s + e.value)} detected',
-                ),
+                FillerFrequencyCard(analysis: fillerAnalysis),
                 const SizedBox(height: 10),
                 _ScoreRow(
                   icon: Icons.accessibility_new_rounded,
@@ -2124,9 +2941,11 @@ class _ReportScreenState extends State<ReportScreen> {
                   child: Padding(
                     padding: const EdgeInsets.all(16),
                     child: fillers.isEmpty
-                        ? const Text(
-                            'No selected filler words were detected during this prototype session.',
-                            style: TextStyle(
+                        ? Text(
+                            fillerAnalysis.hasTranscript
+                                ? 'No listed filler words were found in the transcript.'
+                                : 'Filler detection requires a transcript.',
+                            style: const TextStyle(
                               color: Color(0xFF617085),
                               height: 1.45,
                             ),
@@ -2193,6 +3012,16 @@ class _ReportScreenState extends State<ReportScreen> {
                         ),
                       ),
                     ),
+                  ),
+                ],
+                if (report.referenceScript?.trim().isNotEmpty == true) ...[
+                  const SizedBox(height: 28),
+                  ScriptComparisonSummary(
+                    documentName: report.referenceDocumentName,
+                    omittedPortions: report.omittedScriptPortions,
+                    addedPortions: report.addedTranscriptPortions,
+                    differentlyDeliveredPortions:
+                        report.differentlyDeliveredPortions,
                   ),
                 ],
                 const SizedBox(height: 28),
