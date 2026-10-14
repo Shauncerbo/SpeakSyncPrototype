@@ -468,8 +468,9 @@ class HiveRepository {
     _requireId(practiceSession.id, 'sessionId');
     _requireNonNegative(practiceSession.duration.inSeconds, 'duration');
     final now = DateTime.now();
-    final referenceScript =
-        practiceSession.referenceScript ?? settings?.speechContent;
+    final referenceScript = practiceSession.speechType == 'Impromptu'
+        ? null
+        : practiceSession.referenceScript ?? settings?.speechContent;
     final hasReferenceScript = referenceScript?.trim().isNotEmpty == true;
     final profileId = hasReferenceScript
         ? 'speech-${practiceSession.id}'
@@ -509,10 +510,14 @@ class HiveRepository {
       durationSeconds: durationSeconds,
       sessionDate: practiceSession.dateTime,
       liveAlertsEnabled: settings?.enableLiveFeedback ?? true,
-      bodyLanguageEnabled: settings?.monitorBodyLanguage ?? true,
-      fillerWordEnabled: settings?.monitorFillers ?? true,
-      speakingPaceEnabled: settings?.monitorPace ?? true,
-      cameraAttentionEnabled: settings?.monitorCameraAttention ?? true,
+      bodyLanguageEnabled:
+          settings?.monitorBodyLanguage ?? practiceSession.monitorBodyLanguage,
+      fillerWordEnabled:
+          settings?.monitorFillers ?? practiceSession.monitorFillers,
+      speakingPaceEnabled: settings?.monitorPace ?? practiceSession.monitorPace,
+      cameraAttentionEnabled:
+          settings?.monitorCameraAttention ??
+          practiceSession.monitorCameraAttention,
     );
     final logs = fillers.offsets.entries
         .map(
@@ -530,23 +535,50 @@ class HiveRepository {
       reportId: 'report-${practiceSession.id}',
       sessionId: practiceSession.id,
       totalWords: pace.totalWords,
-      // Hive retains its existing non-null double field. The UI distinguishes
-      // unavailable analysis using transcript and session duration.
-      wordsPerMinute: pace.wordsPerMinute ?? 0.0,
-      paceScore: practiceSession.paceScore,
-      fillerScore: practiceSession.fillerScore,
-      goodPostureSeconds: (durationSeconds * practiceSession.postureScore / 100)
-          .round(),
-      postureScore: practiceSession.postureScore,
+      wordsPerMinute: pace.wordsPerMinute,
+      // Numeric legacy inputs are not evidence of a validated scoring policy.
+      paceScore: null,
+      fillerScore: null,
+      goodPostureSeconds:
+          !session.bodyLanguageEnabled ||
+              practiceSession.postureAnalysisUnavailable
+          ? null
+          : practiceSession.goodPostureSeconds,
+      postureScore: session.bodyLanguageEnabled
+          ? practiceSession.measuredPosturePercentage
+          : null,
+      validPostureSeconds: session.bodyLanguageEnabled
+          ? practiceSession.validPostureSeconds
+          : null,
+      cameraFramingMilliseconds: session.bodyLanguageEnabled
+          ? practiceSession.cameraFramingMilliseconds
+          : null,
       cameraFacingSeconds:
-          (durationSeconds * practiceSession.attentionScore / 100).round(),
-      cameraScore: practiceSession.attentionScore,
-      overallScore: practiceSession.overallScore,
-      coachingTips: List<String>.from(practiceSession.coachingTips),
+          session.cameraAttentionEnabled &&
+              practiceSession.measuredAttentionPercentage != null
+          ? practiceSession.cameraFacingSeconds
+          : null,
+      cameraScore: session.cameraAttentionEnabled
+          ? practiceSession.measuredAttentionPercentage
+          : null,
+      validFaceAnalysisMilliseconds: session.cameraAttentionEnabled
+          ? practiceSession.validFaceAnalysisMilliseconds
+          : null,
+      overallScore: null,
+      coachingTips: List<String>.from(
+        practiceSession.measuredCoachingTipsFor(
+          includePace: session.speakingPaceEnabled,
+          includeFillers: session.fillerWordEnabled,
+          includePosture: session.bodyLanguageEnabled,
+          includeCameraFacing: session.cameraAttentionEnabled,
+        ),
+      ),
       textTranscript: transcript,
       createdAt: now,
       fillerCounts: fillers.counts,
-      recommendedPosture: practiceSession.recommendedPosture,
+      recommendedPosture: session.bodyLanguageEnabled
+          ? practiceSession.postureCoachingRecommendation
+          : 'Upper-body monitoring was off for this rehearsal.',
       isPrototypeData: true,
       referenceScript: hasReferenceScript ? referenceScript : null,
       referenceDocumentName: practiceSession.referenceDocumentName,
@@ -559,6 +591,9 @@ class HiveRepository {
       differentlyDeliveredPortions: List<String>.from(
         practiceSession.differentlyDeliveredPortions,
       ),
+      totalScriptWords: practiceSession.totalScriptWords,
+      matchedScriptWords: practiceSession.matchedScriptWords,
+      scriptComparisonStatus: practiceSession.scriptComparisonStatus,
     );
     return _PracticeRecords(
       profile: profile,
@@ -583,6 +618,17 @@ class HiveRepository {
       paceScore: report.paceScore,
       fillerScore: report.fillerScore,
       postureScore: report.postureScore,
+      goodPostureSeconds: report.goodPostureSeconds,
+      validPostureSeconds: report.validPostureSeconds,
+      cameraFacingSeconds: report.cameraFacingSeconds,
+      validFaceAnalysisMilliseconds: report.validFaceAnalysisMilliseconds,
+      cameraFramingMilliseconds: report.cameraFramingMilliseconds == null
+          ? null
+          : Map<String, int>.unmodifiable(report.cameraFramingMilliseconds!),
+      monitorPace: session.speakingPaceEnabled,
+      monitorFillers: session.fillerWordEnabled,
+      monitorBodyLanguage: session.bodyLanguageEnabled,
+      monitorCameraAttention: session.cameraAttentionEnabled,
       attentionScore: report.cameraScore,
       fillerCounts: Map<String, int>.unmodifiable(report.fillerCounts),
       coachingTips: List<String>.unmodifiable(report.coachingTips),
@@ -598,6 +644,9 @@ class HiveRepository {
       differentlyDeliveredPortions: List<String>.unmodifiable(
         report.differentlyDeliveredPortions,
       ),
+      totalScriptWords: report.totalScriptWords,
+      matchedScriptWords: report.matchedScriptWords,
+      scriptComparisonStatus: report.scriptComparisonStatus,
       recommendedPosture: report.recommendedPosture,
       isPrototypeData: report.isPrototypeData,
     );
@@ -677,16 +726,76 @@ class HiveRepository {
     _requireId(report.reportId, 'reportId');
     _requireSession(report.sessionId);
     _requireNonNegative(report.totalWords, 'total words');
-    if (report.wordsPerMinute < 0) {
-      throw const StorageException('Words per minute cannot be negative');
+    final wpm = report.wordsPerMinute;
+    if (wpm != null && (!wpm.isFinite || wpm < 0)) {
+      throw const StorageException(
+        'Words per minute must be finite and nonnegative',
+      );
     }
     _requireScore(report.paceScore, 'pace score');
     _requireScore(report.fillerScore, 'filler score');
     _requireScore(report.postureScore, 'posture score');
     _requireScore(report.cameraScore, 'camera score');
     _requireScore(report.overallScore, 'overall score');
-    _requireNonNegative(report.goodPostureSeconds, 'good-posture duration');
-    _requireNonNegative(report.cameraFacingSeconds, 'camera-facing duration');
+    final postureSeconds = report.goodPostureSeconds;
+    if (postureSeconds != null) {
+      _requireNonNegative(postureSeconds, 'good-posture duration');
+    }
+    final cameraSeconds = report.cameraFacingSeconds;
+    if (cameraSeconds != null) {
+      _requireNonNegative(cameraSeconds, 'camera-facing duration');
+    }
+    final validPostureSeconds = report.validPostureSeconds;
+    if (validPostureSeconds != null) {
+      _requireNonNegative(validPostureSeconds, 'valid-posture duration');
+      if (postureSeconds != null && postureSeconds > validPostureSeconds) {
+        throw const StorageException(
+          'Good-posture duration exceeds valid pose coverage',
+        );
+      }
+    }
+    // Reading historical records never runs this validation or rewrites them.
+    // New writes cannot turn legacy/manual prototype inputs into real scores.
+    if (report.paceScore != null ||
+        report.fillerScore != null ||
+        report.overallScore != null) {
+      throw const StorageException(
+        'Unvalidated performance scores must be null',
+      );
+    }
+    final validFaceMilliseconds = report.validFaceAnalysisMilliseconds;
+    final framing = report.cameraFramingMilliseconds;
+    if (framing != null &&
+        (framing.keys.any(
+              (key) => !const {'tooClose', 'proper', 'tooFar'}.contains(key),
+            ) ||
+            framing.values.any((value) => value < 0))) {
+      throw const StorageException('Invalid camera-framing analysis durations');
+    }
+    if (validFaceMilliseconds != null) {
+      _requireNonNegative(validFaceMilliseconds, 'valid-face duration');
+      if (cameraSeconds != null &&
+          cameraSeconds * 1000 > validFaceMilliseconds) {
+        throw const StorageException(
+          'Camera-facing duration exceeds valid face coverage',
+        );
+      }
+    }
+    if ((report.cameraScore != null || cameraSeconds != null) &&
+        (validFaceMilliseconds == null ||
+            validFaceMilliseconds < 3000 ||
+            report.cameraScore == null ||
+            cameraSeconds == null)) {
+      throw const StorageException(
+        'Camera-facing results require sufficient valid face evidence',
+      );
+    }
+    if ((report.postureScore != null || postureSeconds != null) &&
+        (validPostureSeconds == null || validPostureSeconds < 3)) {
+      throw const StorageException(
+        'Posture results require at least three seconds of valid pose coverage',
+      );
+    }
   }
 
   void _requireSession(String sessionId) {
@@ -733,8 +842,8 @@ class HiveRepository {
     if (value < 0) throw StorageException('$field cannot be negative');
   }
 
-  void _requireScore(int value, String field) {
-    if (value < 0 || value > 100) {
+  void _requireScore(int? value, String field) {
+    if (value != null && (value < 0 || value > 100)) {
       throw StorageException('$field must be between 0 and 100');
     }
   }

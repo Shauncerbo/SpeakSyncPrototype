@@ -131,20 +131,29 @@ prototype-generated until real speech processing is implemented.
 | `reportId` | String | PK | Required |
 | `sessionId` | String | LR to `rehearsalSessions.sessionId` | Required and unique per session |
 | `totalWords` | Integer | - | Required, non-negative |
-| `wordsPerMinute` | Double | - | Required, non-negative |
-| `paceScore` | Integer | - | Required, 0-100 |
-| `fillerScore` | Integer | - | Required, 0-100 |
-| `goodPostureSeconds` | Integer | - | Required, non-negative |
-| `postureScore` | Integer | - | Required, 0-100 |
-| `cameraFacingSeconds` | Integer | - | Required, non-negative |
-| `cameraScore` | Integer | - | Required, 0-100 |
-| `overallScore` | Integer | - | Required, 0-100 |
-| `coachingTips` | List<String> | - | Required |
+| `wordsPerMinute` | Double? | - | Actual final-transcript WPM, null when unavailable |
+| `paceScore` | Integer? | - | Null in new reports: scoring policy not implemented |
+| `fillerScore` | Integer? | - | Null in new reports: scoring policy not implemented |
+| `goodPostureSeconds` | Integer? | - | Genuine acceptable-pose time, otherwise null |
+| `postureScore` | Integer? | - | Rounded acceptable-time percentage, only with sufficient valid coverage; not a validated educational score |
+| `cameraFacingSeconds` | Integer? | - | Genuine head-facing time, otherwise null |
+| `cameraScore` | Integer? | - | Rounded estimated head-facing percentage, only with sufficient valid coverage; not eye contact |
+| `overallScore` | Integer? | - | Null in new reports: scoring policy not implemented |
+| `coachingTips` | List<String> | - | Final measurement-based advice; legacy tips are not trusted by the UI |
 | `textTranscript` | String | - | Optional |
 | `createdAt` | DateTime | - | Required |
 | `fillerCounts` | Map<String, Integer> | - | Required |
-| `recommendedPosture` | String | - | Required |
+| `recommendedPosture` | String | - | Derived posture advice/unavailability on new saves; legacy fixed text is not displayed |
 | `isPrototypeData` | Boolean | - | Required |
+| `validPostureSeconds` | Integer? | - | Hive field 25: valid Pose coverage; null for legacy records |
+| `validFaceAnalysisMilliseconds` | Integer? | - | Hive field 26: valid Face coverage; null for legacy records |
+| `cameraFramingMilliseconds` | Map<String, Integer>? | - | Optional Hive field 27: valid milliseconds classified tooClose, proper, tooFar; unavailable intervals excluded |
+
+Existing field indexes 0–26, type ID 5 and script-comparison fields 17–24 are
+unchanged. The optional field 27 supplements older records without rewriting
+them. Saved monitoring choices remain in `RehearsalSession` and are restored
+to the runtime `PracticeSession`; they gate advice and measured-result displays.
+See [Phase 4A](phase_4a_measurement_coaching.md) for availability and compatibility.
 
 ## 9. Temporary PracticeSettings
 

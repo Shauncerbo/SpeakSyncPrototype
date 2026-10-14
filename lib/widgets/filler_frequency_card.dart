@@ -4,11 +4,24 @@ import '../core/app_theme.dart';
 import '../services/filler_analysis.dart';
 
 class FillerFrequencyCard extends StatelessWidget {
-  const FillerFrequencyCard({super.key, required this.analysis});
+  const FillerFrequencyCard({
+    super.key,
+    required this.analysis,
+    this.enabled = true,
+  });
   final FillerAnalysis analysis;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
+    if (!enabled) {
+      return const Card(
+        child: Padding(
+          padding: EdgeInsets.all(15),
+          child: Text('Filler frequency: monitoring off for this rehearsal.'),
+        ),
+      );
+    }
     final rate = analysis.perMinute;
     final color = rate == null
         ? const Color(0xFF617085)
@@ -59,21 +72,23 @@ class FillerFrequencyCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            Column(
-              children: [
-                Text(
-                  rate?.toStringAsFixed(1) ?? '—',
-                  style: TextStyle(
-                    color: color,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w900,
+            Flexible(
+              child: Column(
+                children: [
+                  Text(
+                    rate?.toStringAsFixed(1) ?? '—',
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
-                ),
-                Text(
-                  'fillers/min',
-                  style: TextStyle(color: color, fontSize: 12),
-                ),
-              ],
+                  Text(
+                    'fillers/min',
+                    style: TextStyle(color: color, fontSize: 12),
+                  ),
+                ],
+              ),
             ),
           ],
         ),

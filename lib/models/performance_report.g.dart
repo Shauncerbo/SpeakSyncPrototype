@@ -20,14 +20,14 @@ class PerformanceReportAdapter extends TypeAdapter<PerformanceReport> {
       reportId: fields[0] as String,
       sessionId: fields[1] as String,
       totalWords: fields[2] as int,
-      wordsPerMinute: fields[3] as double,
-      paceScore: fields[4] as int,
-      fillerScore: fields[5] as int,
-      goodPostureSeconds: fields[6] as int,
-      postureScore: fields[7] as int,
-      cameraFacingSeconds: fields[8] as int,
-      cameraScore: fields[9] as int,
-      overallScore: fields[10] as int,
+      wordsPerMinute: fields[3] as double?,
+      paceScore: fields[4] as int?,
+      fillerScore: fields[5] as int?,
+      goodPostureSeconds: fields[6] as int?,
+      postureScore: fields[7] as int?,
+      cameraFacingSeconds: fields[8] as int?,
+      cameraScore: fields[9] as int?,
+      overallScore: fields[10] as int?,
       coachingTips: (fields[11] as List).cast<String>(),
       textTranscript: fields[12] as String?,
       createdAt: fields[13] as DateTime,
@@ -45,13 +45,19 @@ class PerformanceReportAdapter extends TypeAdapter<PerformanceReport> {
       differentlyDeliveredPortions: fields[21] == null
           ? []
           : (fields[21] as List).cast<String>(),
+      totalScriptWords: fields[22] as int?,
+      matchedScriptWords: fields[23] as int?,
+      scriptComparisonStatus: fields[24] as String?,
+      validPostureSeconds: fields[25] as int?,
+      validFaceAnalysisMilliseconds: fields[26] as int?,
+      cameraFramingMilliseconds: (fields[27] as Map?)?.cast<String, int>(),
     );
   }
 
   @override
   void write(BinaryWriter writer, PerformanceReport obj) {
     writer
-      ..writeByte(22)
+      ..writeByte(28)
       ..writeByte(0)
       ..write(obj.reportId)
       ..writeByte(1)
@@ -95,7 +101,19 @@ class PerformanceReportAdapter extends TypeAdapter<PerformanceReport> {
       ..writeByte(20)
       ..write(obj.addedTranscriptPortions)
       ..writeByte(21)
-      ..write(obj.differentlyDeliveredPortions);
+      ..write(obj.differentlyDeliveredPortions)
+      ..writeByte(22)
+      ..write(obj.totalScriptWords)
+      ..writeByte(23)
+      ..write(obj.matchedScriptWords)
+      ..writeByte(24)
+      ..write(obj.scriptComparisonStatus)
+      ..writeByte(25)
+      ..write(obj.validPostureSeconds)
+      ..writeByte(26)
+      ..write(obj.validFaceAnalysisMilliseconds)
+      ..writeByte(27)
+      ..write(obj.cameraFramingMilliseconds);
   }
 
   @override

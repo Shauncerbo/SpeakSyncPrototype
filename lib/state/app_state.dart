@@ -55,10 +55,13 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  int get averageScore {
-    if (_sessions.isEmpty) return 0;
-    return (_sessions.fold<int>(0, (sum, item) => sum + item.overallScore) /
-            _sessions.length)
+  int? get averageScore {
+    final scores = _sessions
+        .map((item) => item.validatedOverallScore)
+        .whereType<int>()
+        .toList();
+    if (scores.isEmpty) return null;
+    return (scores.fold<int>(0, (sum, score) => sum + score) / scores.length)
         .round();
   }
 

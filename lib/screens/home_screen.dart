@@ -18,8 +18,10 @@ class HomeScreen extends StatelessWidget {
       ..sort((a, b) => b.dateTime.compareTo(a.dateTime));
     final latest = sessions.isEmpty ? null : sessions.first;
     final previous = sessions.length > 1 ? sessions[1] : null;
-    final improvement = latest != null && previous != null
-        ? latest.overallScore - previous.overallScore
+    final improvement =
+        latest?.validatedOverallScore != null &&
+            previous?.validatedOverallScore != null
+        ? latest!.validatedOverallScore! - previous!.validatedOverallScore!
         : null;
     final latestWeekSessions = latest == null
         ? 0
@@ -118,20 +120,12 @@ class HomeScreen extends StatelessWidget {
                   const SizedBox(height: 28),
                   const SectionHeader('Your snapshot'),
                   const SizedBox(height: 14),
-                  GridView.count(
-                    crossAxisCount: 2,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                    childAspectRatio: 1.18,
+                  ResponsiveCardGrid(
                     children: [
                       MetricCard(
                         icon: Icons.workspace_premium_outlined,
                         label: 'Latest score',
-                        value: latest == null
-                            ? '—'
-                            : '${latest.overallScore}/100',
+                        value: 'Not scored',
                         color: successGreen,
                         onTap: latest == null
                             ? onViewProgress
@@ -156,12 +150,14 @@ class HomeScreen extends StatelessWidget {
                         onTap: onViewProgress,
                       ),
                       MetricCard(
-                        icon: improvement != null && improvement >= 0
+                        icon: improvement == null
+                            ? Icons.insights_rounded
+                            : improvement >= 0
                             ? Icons.trending_up_rounded
                             : Icons.trending_down_rounded,
                         label: 'Latest improvement',
                         value: improvement == null
-                            ? '—'
+                            ? 'Unavailable'
                             : '${improvement >= 0 ? '+' : ''}$improvement pts',
                         color: improvement != null && improvement < 0
                             ? warningOrange
@@ -220,25 +216,7 @@ String _coachingTip(PracticeSession? session) {
   if (session == null) {
     return 'Complete a rehearsal to receive a personalized coaching tip.';
   }
-  final areas = <({int score, String tip})>[
-    (
-      score: session.fillerScore,
-      tip: 'A calm pause sounds more confident than a filler word.',
-    ),
-    (
-      score: session.paceScore,
-      tip: 'Slow down around important ideas and let them settle.',
-    ),
-    (
-      score: session.postureScore,
-      tip: 'Relax your shoulders and keep a steady, confident stance.',
-    ),
-    (
-      score: session.attentionScore,
-      tip: 'Look toward the camera more often to strengthen connection.',
-    ),
-  ]..sort((a, b) => a.score.compareTo(b.score));
-  return areas.first.tip;
+  return session.measuredCoachingTips.first;
 }
 
 void _showWeeklyGoalInfo(BuildContext context) {

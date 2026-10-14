@@ -4,12 +4,21 @@ import '../core/app_theme.dart';
 import '../services/speaking_pace.dart';
 
 class SpeakingPaceCard extends StatelessWidget {
-  const SpeakingPaceCard({super.key, required this.pace});
+  const SpeakingPaceCard({super.key, required this.pace, this.enabled = true});
 
   final SpeakingPace pace;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
+    if (!enabled) {
+      return const Card(
+        child: Padding(
+          padding: EdgeInsets.all(15),
+          child: Text('Speaking Pace: monitoring off for this rehearsal.'),
+        ),
+      );
+    }
     final wpm = pace.wordsPerMinute;
     final color = wpm == null
         ? const Color(0xFF617085)
@@ -56,18 +65,20 @@ class SpeakingPaceCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            Column(
-              children: [
-                Text(
-                  wpm?.toStringAsFixed(1) ?? '—',
-                  style: TextStyle(
-                    color: color,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w900,
+            Flexible(
+              child: Column(
+                children: [
+                  Text(
+                    wpm?.toStringAsFixed(1) ?? '—',
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
-                ),
-                Text('WPM', style: TextStyle(color: color, fontSize: 12)),
-              ],
+                  Text('WPM', style: TextStyle(color: color, fontSize: 12)),
+                ],
+              ),
             ),
           ],
         ),

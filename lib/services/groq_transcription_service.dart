@@ -29,19 +29,26 @@ class GroqTranscriptionService {
     required String apiKey,
     http.Client? client,
     this.timeout = const Duration(seconds: 90),
+    String? prompt,
   }) : _apiKey = apiKey.trim(),
        _client = client ?? http.Client(),
-       _ownsClient = client == null;
+       _ownsClient = client == null,
+       _prompt = prompt?.trim();
 
   static final endpoint = Uri.parse(
     'https://api.groq.com/openai/v1/audio/transcriptions',
   );
   static const model = 'whisper-large-v3-turbo';
   static const maximumAudioBytes = 25 * 1024 * 1024;
+  static const fillerAwarePrompt =
+      "Verbatim Filipino, Bisaya, and English rehearsal speech with audible "
+      "fillers retained: um, uhm, ah, ano, parang, kasi, kuan, ku'an, kanang, "
+      "bitaw, mura'g.";
 
   final String _apiKey;
   final http.Client _client;
   final bool _ownsClient;
+  final String? _prompt;
   final Duration timeout;
 
   Future<String> transcribe(String audioPath) async {
@@ -77,14 +84,19 @@ class GroqTranscriptionService {
       final request = http.MultipartRequest('POST', endpoint)
         ..headers['Authorization'] = 'Bearer $_apiKey'
         ..fields['model'] = model
-        ..fields['response_format'] = 'json'
-        ..files.add(
-          await http.MultipartFile.fromPath(
-            'file',
-            file.path,
-            filename: 'rehearsal.m4a',
-          ),
-        );
+        ..fields['response_format'] = 'json';
+      if (_prompt != null && _prompt.isNotEmpty) {
+        request.fields['prompt'] = _prompt;
+      }
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'file',
+          file.path,
+          filename: audioPath.toLowerCase().endsWith('.wav')
+              ? 'rehearsal.wav'
+              : 'rehearsal.m4a',
+        ),
+      );
 
       final streamedResponse = await _client.send(request).timeout(timeout);
       final response = await http.Response.fromStream(

@@ -56,8 +56,12 @@ void main() {
         paceScore: 90,
         fillerScore: 86,
         postureScore: 89,
+        goodPostureSeconds: 94,
+        validPostureSeconds: 106,
         attentionScore: 87,
-        fillerCounts: const {'Kuan': 2},
+        // Deliberately inconsistent temporary live data. Persistence must
+        // derive the authoritative counts from the complete final transcript.
+        fillerCounts: const {'live-only': 999},
         coachingTips: const ['Keep using purposeful pauses.'],
         textTranscript: 'Kuan kuan persisted prototype transcript.',
         isPrototypeData: true,
@@ -93,7 +97,7 @@ void main() {
       expect(repository.getPracticeSessions(), hasLength(5));
       expect(
         repository.getPerformanceReportBySessionId(completed.id)?.overallScore,
-        88,
+        isNull,
       );
       final logs = repository.getFillerLogsBySessionId(completed.id);
       expect(logs, hasLength(1));
@@ -129,14 +133,27 @@ void main() {
             .transcriptOffsets,
         [0, 5],
       );
-      expect(savedReport.paceScore, completed.paceScore);
-      expect(savedReport.overallScore, completed.overallScore);
+      expect(savedReport.paceScore, isNull);
+      expect(savedReport.fillerScore, isNull);
+      expect(savedReport.overallScore, isNull);
+      expect(savedReport.cameraScore, isNull);
+      expect(savedReport.cameraFacingSeconds, isNull);
+      expect(savedReport.postureScore, 89);
+      expect(
+        repository.getAllRehearsalSessions().first.cameraAttentionEnabled,
+        isTrue,
+      );
+      expect(savedReport.goodPostureSeconds, 94);
+      expect(savedReport.validPostureSeconds, 106);
       final reloaded = repository.getPracticeSessions().singleWhere(
         (session) => session.id == completed.id,
       );
       expect(reloaded.speakingPace.totalWords, savedReport.totalWords);
       expect(reloaded.speakingPace.wordsPerMinute, savedReport.wordsPerMinute);
       expect(reloaded.speakingPace.classification, 'Slow');
+      expect(reloaded.goodPostureSeconds, 94);
+      expect(reloaded.validPostureSeconds, 106);
+      expect(reloaded.postureAnalysisUnavailable, isFalse);
 
       await repository.clearPrototypeData();
       expect(repository.getPracticeSessions(), isEmpty);
@@ -215,7 +232,9 @@ void main() {
     final restored = state.sessions.singleWhere(
       (item) => item.id == 'app-state-persisted-session',
     );
-    expect(restored.overallScore, 91);
+    expect(restored.overallScore, isNull);
+    expect(restored.postureScore, isNull);
+    expect(restored.goodPostureSeconds, isNull);
     expect(restored.fillerCounts, const {'ano': 1});
     expect(
       repository

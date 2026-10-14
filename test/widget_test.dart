@@ -71,6 +71,7 @@ void main() {
   Future<void> enterValidSetup(
     WidgetTester tester, {
     String duration = '3 minutes',
+    bool openPreview = true,
   }) async {
     await tester.enterText(
       find.byKey(const Key('speech_title')),
@@ -91,6 +92,14 @@ void main() {
     await tester.ensureVisible(find.byKey(const Key('setup_continue')));
     await tester.tap(find.byKey(const Key('setup_continue')));
     await tester.pumpAndSettle();
+    expect(find.byType(DeviceCheckScreen), findsOneWidget);
+    expect(find.byType(RehearsalScreen), findsNothing);
+    expect(find.byKey(const Key('rehearsal_timer')), findsNothing);
+    if (openPreview) {
+      await tester.ensureVisible(find.byKey(const Key('start_rehearsal')));
+      await tester.tap(find.byKey(const Key('start_rehearsal')));
+      await tester.pumpAndSettle();
+    }
   }
 
   Future<void> openRehearsal(WidgetTester tester) async {
@@ -174,7 +183,7 @@ void main() {
     expect(find.text('Please enter a speech title.'), findsOneWidget);
   });
 
-  testWidgets('5. Valid setup opens camera readiness before rehearsal', (
+  testWidgets('5. Valid setup opens Device Check before camera readiness', (
     tester,
   ) async {
     await setPhoneSize(tester);
@@ -268,6 +277,10 @@ void main() {
         }
         await tester.pumpAndSettle();
         await tester.pump(const Duration(seconds: 5));
+        expect(find.byType(DeviceCheckScreen), findsOneWidget);
+        expect(find.byType(RehearsalScreen), findsNothing);
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
         expect(find.text('Practice Setup'), findsOneWidget);
         expect(find.text('Performance Report'), findsNothing);
         expect(state.currentReport, isNull);
@@ -320,10 +333,69 @@ void main() {
     await openRehearsal(tester);
 
     expect(find.byKey(const Key('demo_controls')), findsNothing);
+    expect(find.byKey(const Key('prototype_alert_controls')), findsNothing);
+    expect(find.byKey(const Key('test_filler_alert')), findsNothing);
+    expect(find.byKey(const Key('test_fast_speech_alert')), findsNothing);
+    expect(find.text('82%'), findsNothing);
     expect(find.text('Prototype Demo Controls'), findsNothing);
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
+  });
+
+  testWidgets('Camera-facing attention toggle controls rehearsal monitoring', (
+    tester,
+  ) async {
+    await setPhoneSize(tester);
+    final state = await openHome(tester);
+    await openSetup(tester);
+    final cameraSwitch = find.byKey(const Key('camera_attention_monitoring'));
+    await tester.ensureVisible(cameraSwitch);
+    expect(tester.widget<SwitchListTile>(cameraSwitch).value, isTrue);
+    expect(tester.widget<SwitchListTile>(cameraSwitch).onChanged, isNotNull);
+    expect(
+      find.text('Estimated head direction, not eye contact (Android)'),
+      findsOneWidget,
+    );
+    await tester.tap(cameraSwitch);
+    await tester.pumpAndSettle();
+    expect(tester.widget<SwitchListTile>(cameraSwitch).value, isFalse);
+    await tester.ensureVisible(find.byKey(const Key('speech_title')));
+    await tester.pumpAndSettle();
+    await enterValidSetup(tester);
+    expect(state.currentSetup!.monitorCameraAttention, isFalse);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('Privacy distinguishes cloud speech from local visual analysis', (
+    tester,
+  ) async {
+    await setPhoneSize(tester);
+    await openHome(tester);
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('View Privacy Details'));
+    await tester.tap(find.text('View Privacy Details'));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Groq Cloud API for OpenAI Whisper'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining(
+        'MediaPipe Pose and Face analyze camera frames locally',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('stored locally using Hive'), findsOneWidget);
+    expect(find.textContaining('Crashes or cleanup errors'), findsOneWidget);
+    expect(
+      find.textContaining('Immediate deletion by Groq has not been verified'),
+      findsOneWidget,
+    );
+    expect(find.text('No cloud upload or automatic sharing.'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('8. End Session reaches report', (tester) async {
@@ -436,6 +508,9 @@ void main() {
   testWidgets('10. Saving adds a progress entry', (tester) async {
     await setPhoneSize(tester);
     final state = AppState();
+    await state.updatePreferences(
+      state.preferences.copyWith(liveFeedback: false),
+    );
     final initialCount = state.sessions.length;
     state.setCurrentReport(
       PracticeSession(
@@ -492,16 +567,79 @@ void main() {
     expect(state.preferences.liveFeedback, isFalse);
   });
 
+  testWidgets('Transcription errors remain visible with Live Feedback OFF', (
+    tester,
+  ) async {
+    await setPhoneSize(tester);
+    final state = AppState();
+    await state.updatePreferences(
+      state.preferences.copyWith(liveFeedback: false),
+    );
+    await tester.pumpWidget(
+      AppStateScope(
+        notifier: state,
+        child: AppTimingScope(
+          splashDuration: Duration.zero,
+          deviceCheckDuration: Duration.zero,
+          internetConnectivity: _FakeInternetConnectivity(true),
+          analysisDuration: const Duration(days: 1),
+          child: const MaterialApp(
+            home: AnalyzingScreen(
+              transcriptionErrorMessage:
+                  'Groq could not transcribe this recording.',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('Transcript unavailable'), findsOneWidget);
+    expect(
+      find.text('Groq could not transcribe this recording.'),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets(
+    'Connectivity notices remain global during rehearsal with Live Feedback OFF',
+    (tester) async {
+      await setPhoneSize(tester);
+      final connectivity = _FakeInternetConnectivity(true);
+      addTearDown(connectivity.dispose);
+      final state = await openHome(tester, internetConnectivity: connectivity);
+      await state.updatePreferences(
+        state.preferences.copyWith(liveFeedback: false),
+      );
+      await openSetup(tester);
+      await enterValidSetup(tester);
+      await openRehearsal(tester);
+      expect(state.currentSetup!.enableLiveFeedback, isFalse);
+      connectivity.setConnected(false);
+      await tester.pump();
+      await tester.pump();
+      expect(
+        find.text("You're offline. Check your internet connection."),
+        findsOneWidget,
+      );
+      connectivity.setConnected(true);
+      await tester.pump();
+      await tester.pump();
+      expect(find.text("You're back online."), findsOneWidget);
+      expect(find.byKey(const Key('rehearsal_timer')), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    },
+  );
+
   testWidgets('12. Device Check reacts to internet changes', (tester) async {
     await setPhoneSize(tester);
     final connectivity = _FakeInternetConnectivity(false);
     addTearDown(connectivity.dispose);
     await openHome(tester, internetConnectivity: connectivity);
     await openSetup(tester);
-    await enterValidSetup(tester);
-    await tester.ensureVisible(find.byKey(const Key('preview_device_check')));
-    await tester.tap(find.byKey(const Key('preview_device_check')));
-    await tester.pumpAndSettle();
+    await enterValidSetup(tester, openPreview: false);
 
     expect(find.text('Not available'), findsOneWidget);
     var startButton = find.byKey(const Key('start_rehearsal'));

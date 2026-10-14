@@ -36,21 +36,33 @@ class SettingsScreen extends StatelessWidget {
     return showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
         title: const Row(
           children: [
             Icon(Icons.privacy_tip_outlined, color: accentTeal),
             SizedBox(width: 10),
-            Text('Privacy Details'),
+            Expanded(child: Text('Privacy Details')),
           ],
         ),
         content: const Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _DialogPoint('Camera and microphone are used during rehearsal.'),
-            _DialogPoint('Reports stay inside the prototype.'),
-            _DialogPoint('No cloud upload or automatic sharing.'),
-            _DialogPoint('You can reset all dummy data in Settings.'),
+            _DialogPoint(
+              'Recorded speech audio is sent to the Groq Cloud API for OpenAI Whisper transcription. Optional live feedback also sends short audio chunks.',
+            ),
+            _DialogPoint(
+              'MediaPipe Pose and Face analyze camera frames locally on your device. The normal rehearsal flow does not save or upload video. Head direction does not measure eye contact or concentration.',
+            ),
+            _DialogPoint(
+              'Transcripts, reference scripts, rehearsal results, and preferences are stored locally using Hive. If local storage is unavailable, unsaved data stays in app memory.',
+            ),
+            _DialogPoint(
+              'The app attempts to delete temporary audio after processing, restart, or cancellation. Crashes or cleanup errors can leave files behind.',
+            ),
+            _DialogPoint(
+              'Groq handles uploaded audio under its own policies. Immediate deletion by Groq has not been verified by this app.',
+            ),
           ],
         ),
         actions: [
@@ -178,7 +190,7 @@ class SettingsScreen extends StatelessWidget {
           child: Text(
             '1. Start a practice from Home.\n\n'
             '2. Choose your speech and monitoring settings.\n\n'
-            '3. Use the demo controls during rehearsal to simulate feedback.\n\n'
+            '3. Check the camera preview and ambient noise, press I’m Ready, and wait for the countdown. Optional live speech feedback requires internet.\n\n'
             '4. End the session to review and save your report.',
             style: TextStyle(height: 1.45),
           ),
@@ -239,7 +251,8 @@ class SettingsScreen extends StatelessWidget {
                       key: const Key('settings_camera_attention'),
                       icon: Icons.visibility_outlined,
                       title: 'Camera-facing attention',
-                      subtitle: 'Remind me when I look away',
+                      subtitle:
+                          'Estimate head direction locally (Android), not eye contact',
                       value: preferences.cameraAttentionMonitoring,
                       onChanged: (value) => _update(
                         context,
@@ -297,11 +310,13 @@ class SettingsScreen extends StatelessWidget {
                       Padding(
                         padding: const EdgeInsets.fromLTRB(8, 12, 8, 0),
                         child: DropdownButtonFormField<String>(
+                          isExpanded: true,
                           initialValue: preferences.alertFrequency,
                           decoration: const InputDecoration(
                             labelText: 'Alert frequency',
                             helperText:
                                 'How often coaching reminders may appear',
+                            helperMaxLines: 3,
                             prefixIcon: Icon(
                               Icons.notifications_active_outlined,
                             ),
@@ -450,7 +465,7 @@ class _PreferenceSwitch extends StatelessWidget {
   final String title;
   final String subtitle;
   final bool value;
-  final ValueChanged<bool> onChanged;
+  final ValueChanged<bool>? onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -568,9 +583,9 @@ class AboutScreen extends StatelessWidget {
                 const SizedBox(height: 16),
                 const InfoBanner(
                   icon: Icons.science_outlined,
-                  title: 'Front-end prototype',
+                  title: 'Current analysis',
                   message:
-                      'This front-end prototype uses simulated data and does not yet perform real AI analysis.',
+                      'Speech transcription uses Groq Cloud and OpenAI Whisper. Posture and camera framing use on-device MediaPipe Pose. MediaPipe Face estimates head direction locally, not eye contact. Validated overall scoring is not available yet.',
                   color: warningOrange,
                 ),
               ],

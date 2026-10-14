@@ -39,7 +39,7 @@ class _SplashScreenState extends State<SplashScreen> {
     return Scaffold(
       backgroundColor: navy,
       body: SafeArea(
-        child: Center(
+        child: ScrollableCenter(
           child: Padding(
             padding: const EdgeInsets.all(28),
             child: Column(
@@ -146,12 +146,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            Padding(
+            PageFrame(
               padding: const EdgeInsets.fromLTRB(20, 12, 12, 0),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const SpeakSyncLogo(size: 38),
+                  const Expanded(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: SpeakSyncLogo(size: 38),
+                    ),
+                  ),
                   TextButton(
                     key: const Key('onboarding_skip'),
                     onPressed: _finish,
@@ -168,47 +173,49 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 onPageChanged: (value) => setState(() => _page = value),
                 itemBuilder: (context, index) {
                   final item = _pages[index];
-                  return PageFrame(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          width: 170,
-                          height: 170,
-                          decoration: BoxDecoration(
-                            color: item.$4.withValues(alpha: .09),
-                            shape: BoxShape.circle,
+                  return ScrollableCenter(
+                    child: PageFrame(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            width: 170,
+                            height: 170,
+                            decoration: BoxDecoration(
+                              color: item.$4.withValues(alpha: .09),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(item.$1, color: item.$4, size: 82),
                           ),
-                          child: Icon(item.$1, color: item.$4, size: 82),
-                        ),
-                        const SizedBox(height: 42),
-                        Text(
-                          item.$2,
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.headlineMedium
-                              ?.copyWith(
-                                fontWeight: FontWeight.w900,
-                                color: navy,
-                                letterSpacing: -.7,
-                              ),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          item.$3,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Color(0xFF617085),
-                            fontSize: 16,
-                            height: 1.55,
+                          const SizedBox(height: 42),
+                          Text(
+                            item.$2,
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.headlineMedium
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                  color: navy,
+                                  letterSpacing: -.7,
+                                ),
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: 16),
+                          Text(
+                            item.$3,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Color(0xFF617085),
+                              fontSize: 16,
+                              height: 1.55,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   );
                 },
               ),
             ),
-            Padding(
+            PageFrame(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
               child: Column(
                 children: [

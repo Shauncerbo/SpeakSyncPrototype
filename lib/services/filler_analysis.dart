@@ -3,10 +3,7 @@ class FillerAnalysis {
   FillerAnalysis._(this.hasTranscript, this.offsets, this.duration);
 
   factory FillerAnalysis.fromTranscript(String? transcript, Duration duration) {
-    final normalized = (transcript ?? '')
-        .toLowerCase()
-        .replaceAll('’', "'")
-        .replaceAll('‘', "'");
+    final normalized = normalizeTranscript(transcript);
     final tokens = RegExp(
       r"[\p{L}\p{N}]+(?:'[\p{L}\p{N}]+)*",
       unicode: true,
@@ -21,7 +18,7 @@ class FillerAnalysis {
         filler = 'uhm';
       } else if (RegExp(r'^ah+$').hasMatch(token)) {
         filler = 'ah';
-      } else if (token == 'kwan') {
+      } else if (token == 'kwan' || token == "ku'an") {
         filler = 'kuan';
       } else if (token == 'murag' || token == "mura'g") {
         filler = "mura'g";
@@ -49,6 +46,11 @@ class FillerAnalysis {
       duration,
     );
   }
+
+  static String normalizeTranscript(String? transcript) => (transcript ?? '')
+      .toLowerCase()
+      .replaceAll('’', "'")
+      .replaceAll('‘', "'");
 
   final bool hasTranscript;
 

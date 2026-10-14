@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../core/app_theme.dart';
 import '../models/practice_session.dart';
+import '../services/script_comparison_service.dart';
 
 class SpeakSyncLogo extends StatelessWidget {
   const SpeakSyncLogo({
@@ -51,13 +52,18 @@ class SpeakSyncLogo extends StatelessWidget {
           ),
           if (showName) ...[
             const SizedBox(width: 12),
-            Text(
-              'SpeakSync',
-              style: TextStyle(
-                color: foreground,
-                fontSize: size * .38,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -.6,
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  'SpeakSync',
+                  style: TextStyle(
+                    color: foreground,
+                    fontSize: size * .38,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -.6,
+                  ),
+                ),
               ),
             ),
           ],
@@ -91,6 +97,69 @@ class PageFrame extends StatelessWidget {
   }
 }
 
+/// Centers short content but keeps it reachable on short/landscape viewports.
+class ScrollableCenter extends StatelessWidget {
+  const ScrollableCenter({super.key, required this.child});
+  final Widget child;
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) => SingleChildScrollView(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minHeight: constraints.maxHeight),
+        child: Center(child: child),
+      ),
+    ),
+  );
+}
+
+/// Equal-width cards with content-driven row heights, not fixed aspect ratios.
+class ResponsiveCardGrid extends StatelessWidget {
+  const ResponsiveCardGrid({
+    super.key,
+    required this.children,
+    this.columns = 2,
+    this.spacing = 12,
+    this.minimumCardWidth = 140,
+  });
+  final List<Widget> children;
+  final int columns;
+  final double spacing;
+  final double minimumCardWidth;
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+      final count =
+          ((constraints.maxWidth + spacing) /
+                  (minimumCardWidth * textScale + spacing))
+              .floor()
+              .clamp(1, columns);
+      return Column(
+        children: [
+          for (var start = 0; start < children.length; start += count) ...[
+            if (start > 0) SizedBox(height: spacing),
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var index = 0; index < count; index++) ...[
+                    if (index > 0) SizedBox(width: spacing),
+                    Expanded(
+                      child: start + index < children.length
+                          ? children[start + index]
+                          : const SizedBox(),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ],
+      );
+    },
+  );
+}
+
 class SectionHeader extends StatelessWidget {
   const SectionHeader(this.title, {super.key, this.trailing});
   final String title;
@@ -98,19 +167,41 @@ class SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            title,
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: navy,
+    final heading = Text(
+      title,
+      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+        fontWeight: FontWeight.w800,
+        color: navy,
+      ),
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (trailing != null &&
+            constraints.maxWidth < 400 &&
+            MediaQuery.textScalerOf(context).scale(14) > 14) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              heading,
+              Align(alignment: Alignment.centerRight, child: trailing),
+            ],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: navy,
+                ),
+              ),
             ),
-          ),
-        ),
-        if (trailing case final Widget trailing) trailing,
-      ],
+            if (trailing case final Widget trailing) trailing,
+          ],
+        );
+      },
     );
   }
 }
@@ -238,15 +329,15 @@ class ScriptComparisonSummary extends StatelessWidget {
   const ScriptComparisonSummary({
     super.key,
     required this.documentName,
-    required this.omittedPortions,
-    required this.addedPortions,
-    required this.differentlyDeliveredPortions,
+    required this.result,
   });
 
   final String? documentName;
-  final List<String> omittedPortions;
-  final List<String> addedPortions;
-  final List<String> differentlyDeliveredPortions;
+  final ScriptComparisonResult result;
+  List<String> get omittedPortions => result.omittedPortions;
+  List<String> get addedPortions => result.addedPortions;
+  List<String> get differentlyDeliveredPortions =>
+      result.differentlyDeliveredPortions;
 
   @override
   Widget build(BuildContext context) {
@@ -257,7 +348,7 @@ class ScriptComparisonSummary extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SectionHeader('Script comparison'),
+        const SectionHeader('Prepared Speech Comparison'),
         const SizedBox(height: 6),
         Text(
           documentName == null
@@ -268,44 +359,77 @@ class ScriptComparisonSummary extends StatelessWidget {
         const SizedBox(height: 12),
         const InfoBanner(
           icon: Icons.rule_rounded,
-          title: 'Delivery comparison only',
+          title: 'Script adherence only',
           message:
-              'This checks wording against the reference script. It does not judge whether the content is factually correct or incorrect.',
+              'This compares wording, not content quality. Transcription may miss words or fillers. Coverage does not affect your overall score.',
           color: accentTeal,
         ),
         const SizedBox(height: 12),
-        if (!hasDifferences)
-          const InfoBanner(
-            icon: Icons.check_circle_outline_rounded,
-            title: 'Script closely followed',
-            message:
-                'No meaningful omissions, additions, or wording differences were identified.',
-            color: successGreen,
+        if (!result.isAvailable)
+          InfoBanner(
+            icon: Icons.info_outline_rounded,
+            title: 'Script comparison unavailable',
+            message: result.unavailableReason,
+            color: warningOrange,
           )
         else ...[
-          _ScriptDifferenceGroup(
-            icon: Icons.remove_circle_outline_rounded,
-            title: 'Omitted from delivery',
-            emptyMessage: 'No omitted portions identified.',
-            portions: omittedPortions,
-            color: warningOrange,
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Script Coverage: ${result.coverage!.toStringAsFixed(1)}%',
+                    key: const Key('script_coverage'),
+                    style: const TextStyle(
+                      color: navy,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '${result.matchedReferenceWords} matched words / ${result.totalReferenceWords} total script words',
+                    style: const TextStyle(color: Color(0xFF617085)),
+                  ),
+                ],
+              ),
+            ),
           ),
-          const SizedBox(height: 10),
-          _ScriptDifferenceGroup(
-            icon: Icons.add_circle_outline_rounded,
-            title: 'Added during delivery',
-            emptyMessage: 'No added portions identified.',
-            portions: addedPortions,
-            color: primaryBlue,
-          ),
-          const SizedBox(height: 10),
-          _ScriptDifferenceGroup(
-            icon: Icons.compare_arrows_rounded,
-            title: 'Delivered differently',
-            emptyMessage: 'No changed portions identified.',
-            portions: differentlyDeliveredPortions,
-            color: accentTeal,
-          ),
+          if (!hasDifferences)
+            const InfoBanner(
+              icon: Icons.check_circle_outline_rounded,
+              title: 'Script wording matched',
+              message:
+                  'No meaningful omissions, additions, or wording differences were identified.',
+              color: successGreen,
+            )
+          else ...[
+            _ScriptDifferenceGroup(
+              icon: Icons.remove_circle_outline_rounded,
+              title: 'Omitted Portions',
+              emptyMessage: 'No omitted portions identified.',
+              portions: omittedPortions,
+              color: warningOrange,
+            ),
+            const SizedBox(height: 10),
+            _ScriptDifferenceGroup(
+              icon: Icons.add_circle_outline_rounded,
+              title: 'Added Portions',
+              emptyMessage: 'No added portions identified.',
+              portions: addedPortions,
+              color: primaryBlue,
+            ),
+            const SizedBox(height: 10),
+            _ScriptDifferenceGroup(
+              icon: Icons.compare_arrows_rounded,
+              title: 'Different Wording',
+              emptyMessage: 'No changed portions identified.',
+              portions: differentlyDeliveredPortions,
+              color: accentTeal,
+            ),
+          ],
         ],
       ],
     );
@@ -410,87 +534,109 @@ class StatusCard extends StatelessWidget {
     this.isPending = false,
     this.isSuccessful = true,
   });
-
   final IconData icon;
   final String title;
   final String status;
   final bool isChecking;
   final bool isPending;
   final bool isSuccessful;
-
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        minTileHeight: 72,
-        leading: CircleAvatar(
-          backgroundColor: accentTeal.withValues(alpha: .1),
-          foregroundColor: accentTeal,
-          child: Icon(icon),
-        ),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-        trailing: SizedBox(
-          width: 110,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.start,
-            children: [
-              if (isChecking)
-                const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              else if (isPending)
-                const Icon(
-                  Icons.more_horiz_rounded,
-                  color: Color(0xFF94A3B8),
-                  size: 20,
-                )
-              else
-                Icon(
-                  isSuccessful
-                      ? Icons.check_circle_rounded
-                      : Icons.error_outline_rounded,
-                  color: isSuccessful ? successGreen : errorRed,
-                  size: 20,
-                ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  status,
-                  style: TextStyle(
-                    color: isPending
-                        ? const Color(0xFF94A3B8)
-                        : isSuccessful
-                        ? successGreen
-                        : errorRed,
-                    fontWeight: FontWeight.w700,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
+    final color = isPending
+        ? const Color(0xFF94A3B8)
+        : isSuccessful
+        ? successGreen
+        : errorRed;
+    final indicator = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (isChecking)
+          const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        else
+          Icon(
+            isPending
+                ? Icons.more_horiz_rounded
+                : isSuccessful
+                ? Icons.check_circle_rounded
+                : Icons.error_outline_rounded,
+            color: color,
+            size: 20,
+          ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            status,
+            style: TextStyle(color: color, fontWeight: FontWeight.w700),
           ),
         ),
-      ),
+      ],
+    );
+    final avatar = CircleAvatar(
+      backgroundColor: accentTeal.withValues(alpha: .1),
+      foregroundColor: accentTeal,
+      child: Icon(icon),
+    );
+    final heading = Text(
+      title,
+      style: const TextStyle(fontWeight: FontWeight.w700),
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 340 ||
+            MediaQuery.textScalerOf(context).scale(14) > 17) {
+          return Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  avatar,
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [heading, const SizedBox(height: 8), indicator],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+        return Card(
+          child: ListTile(
+            minTileHeight: 72,
+            leading: avatar,
+            title: heading,
+            trailing: SizedBox(width: 110, child: indicator),
+          ),
+        );
+      },
     );
   }
 }
 
 class ScoreRing extends StatelessWidget {
   const ScoreRing({super.key, required this.score, this.size = 150});
-  final int score;
+  final int? score;
   final double size;
 
   @override
   Widget build(BuildContext context) {
-    final color = score >= 80
+    final color = score == null
+        ? const Color(0xFF617085)
+        : score! >= 80
         ? successGreen
-        : score >= 70
+        : score! >= 70
         ? warningOrange
         : errorRed;
     return Semantics(
-      label: 'Performance score $score out of 100',
+      label: score == null
+          ? 'Overall score not available'
+          : 'Performance score $score out of 100',
       child: SizedBox(
         width: size,
         height: size,
@@ -501,7 +647,7 @@ class ScoreRing extends StatelessWidget {
               width: size,
               height: size,
               child: CircularProgressIndicator(
-                value: score / 100,
+                value: score == null ? 0 : score! / 100,
                 strokeWidth: 12,
                 strokeCap: StrokeCap.round,
                 color: color,
@@ -512,7 +658,7 @@ class ScoreRing extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  '$score',
+                  score == null ? '—' : '$score',
                   style: TextStyle(
                     fontSize: size * .3,
                     height: 1,
@@ -520,9 +666,9 @@ class ScoreRing extends StatelessWidget {
                     color: navy,
                   ),
                 ),
-                const Text(
-                  'out of 100',
-                  style: TextStyle(color: Color(0xFF617085)),
+                Text(
+                  score == null ? 'Not scored' : 'out of 100',
+                  style: const TextStyle(color: Color(0xFF617085)),
                 ),
               ],
             ),
@@ -559,7 +705,7 @@ class SessionCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Text(
-                  '${session.overallScore}',
+                  '—',
                   style: const TextStyle(
                     color: primaryBlue,
                     fontWeight: FontWeight.w900,
@@ -591,7 +737,7 @@ class SessionCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      session.speechType,
+                      '${session.speechType}${session.isDemoSession ? ' · Demo example' : ''} · Not scored',
                       style: const TextStyle(
                         fontSize: 12,
                         color: accentTeal,
@@ -640,6 +786,20 @@ class ProgressChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scoredSessions = sessions
+        .where((session) => session.validatedOverallScore != null)
+        .toList();
+    if (scoredSessions.isEmpty) {
+      return const SizedBox(
+        height: 160,
+        child: Center(
+          child: Text(
+            'Score trend unavailable. A validated scoring policy is not implemented yet.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
     return Semantics(
       label: 'Progress chart showing recent performance scores',
       child: Column(
@@ -659,7 +819,7 @@ class ProgressChart extends StatelessWidget {
           SizedBox(
             height: 210,
             width: double.infinity,
-            child: CustomPaint(painter: _ProgressChartPainter(sessions)),
+            child: CustomPaint(painter: _ProgressChartPainter(scoredSessions)),
           ),
           const Padding(
             padding: EdgeInsets.only(left: 34, top: 4, bottom: 4),
@@ -734,7 +894,8 @@ class _ProgressChartPainter extends CustomPainter {
       final x = values.length == 1
           ? plotLeft + plotWidth / 2
           : plotLeft + plotWidth * i / (values.length - 1);
-      final normalized = (values[i].overallScore.clamp(40, 100) - 40) / 60;
+      final normalized =
+          (values[i].validatedOverallScore!.clamp(40, 100) - 40) / 60;
       final y = plotTop + plotHeight - normalized * plotHeight;
       points.add(Offset(x, y));
     }
@@ -754,7 +915,7 @@ class _ProgressChartPainter extends CustomPainter {
       canvas.drawCircle(point, 4, pointPaint);
       _paintText(
         canvas,
-        '${values[index].overallScore}',
+        '${values[index].validatedOverallScore}',
         Offset(point.dx, point.dy - 10),
         const TextStyle(
           color: primaryBlue,

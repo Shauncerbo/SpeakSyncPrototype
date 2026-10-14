@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -13,14 +14,27 @@ import '../models/practice_session.dart';
 import '../models/practice_settings.dart';
 import '../services/groq_transcription_service.dart';
 import '../services/filler_analysis.dart';
+import '../services/live_filler_feedback_service.dart';
 import '../services/internet_connectivity_service.dart';
 import '../services/rehearsal_audio_recorder.dart';
+import '../services/screen_awake_service.dart';
+import '../services/ambient_noise_service.dart';
+import '../services/camera_framing.dart';
+import '../services/camera_framing_warning_controller.dart';
+import '../services/camera_framing_summary.dart';
+import '../widgets/live_feedback_overlay.dart';
+import '../services/posture_analysis.dart';
+import '../services/face_attention.dart';
+import '../services/posture_landmarker_service.dart';
+import '../services/posture_performance.dart';
+import '../services/posture_warning_controller.dart';
 import '../services/script_comparison_service.dart';
 import '../services/speech_document_service.dart';
 import '../state/app_state.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/speaking_pace_card.dart';
 import '../widgets/filler_frequency_card.dart';
+import '../widgets/pose_landmark_overlay.dart';
 import 'main_shell.dart';
 
 class PracticeSetupScreen extends StatefulWidget {
@@ -83,6 +97,7 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
   }
 
   void _continue() {
+    if (_isExtractingDocument) return;
     if (!_formKey.currentState!.validate()) return;
     final settings = PracticeSettings(
       speechTitle: _titleController.text.trim(),
@@ -100,12 +115,9 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
       enableLiveFeedback: _live,
     );
     AppStateScope.of(context, listen: false).setCurrentSetup(settings);
-    final connectivity = AppTimingScope.of(context).internetConnectivity;
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => RehearsalScreen(internetConnectivity: connectivity),
-      ),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const DeviceCheckScreen()));
   }
 
   bool get _requiresReferenceScript =>
@@ -126,7 +138,7 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
     setState(() => _isExtractingDocument = true);
     try {
       final document = await _documentService.pickAndExtract();
-      if (document == null || !mounted) return;
+      if (document == null || !mounted || !_requiresReferenceScript) return;
       setState(() {
         _referenceDocumentName = document.fileName;
         _speechContentController.text = document.text;
@@ -260,7 +272,7 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                                 label: Text(
                                   _isExtractingDocument
                                       ? 'Reading document...'
-                                      : 'Choose TXT or DOCX',
+                                      : 'Choose PDF, DOCX, or TXT',
                                 ),
                               )
                             else
@@ -296,9 +308,21 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                                       ),
                                     ),
                                     IconButton(
+                                      key: const Key('replace_speech_document'),
+                                      tooltip: 'Replace document',
+                                      onPressed: _isExtractingDocument
+                                          ? null
+                                          : _chooseSpeechDocument,
+                                      icon: const Icon(
+                                        Icons.swap_horiz_rounded,
+                                      ),
+                                    ),
+                                    IconButton(
                                       key: const Key('remove_speech_document'),
                                       tooltip: 'Remove document',
-                                      onPressed: _removeSpeechDocument,
+                                      onPressed: _isExtractingDocument
+                                          ? null
+                                          : _removeSpeechDocument,
                                       icon: const Icon(Icons.close_rounded),
                                     ),
                                   ],
@@ -366,7 +390,7 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                   const SectionHeader('Detection settings'),
                   const SizedBox(height: 6),
                   const Text(
-                    'Choose what the prototype should monitor during rehearsal.',
+                    'Choose what to monitor during rehearsal.',
                     style: TextStyle(color: Color(0xFF617085), fontSize: 13),
                   ),
                   const SizedBox(height: 12),
@@ -387,7 +411,9 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                         SwitchListTile(
                           key: const Key('camera_attention_monitoring'),
                           title: const Text('Camera-facing attention'),
-                          subtitle: const Text('Looking toward the camera'),
+                          subtitle: const Text(
+                            'Estimated head direction, not eye contact (Android)',
+                          ),
                           secondary: const Icon(Icons.visibility_outlined),
                           value: _cameraAttention,
                           onChanged: (value) =>
@@ -623,7 +649,7 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
             if (setup.monitorFillers) 'Filler words',
             if (setup.monitorPace) 'Speaking pace',
             if (setup.monitorBodyLanguage) 'Posture',
-            if (setup.monitorCameraAttention) 'Camera attention',
+            if (setup.monitorCameraAttention) 'Head direction',
           ];
     return Scaffold(
       appBar: AppBar(title: const Text('Device Check')),
@@ -798,18 +824,33 @@ class _Instruction extends StatelessWidget {
   }
 }
 
+double _cameraFrameWidth(BuildContext context) {
+  final size = MediaQuery.sizeOf(context);
+  if (size.width <= size.height) return 430;
+  final usableHeight =
+      size.height -
+      MediaQuery.paddingOf(context).vertical -
+      kToolbarHeight -
+      80;
+  return (usableHeight.clamp(140.0, 405.0) * 16 / 9).clamp(0.0, 720.0);
+}
+
 class _ReadinessCard extends StatelessWidget {
   const _ReadinessCard({
     required this.busy,
     required this.starting,
     required this.onReady,
     required this.onDeviceCheck,
+    required this.noiseChecking,
+    required this.noiseResult,
   });
 
   final bool busy;
   final bool starting;
   final VoidCallback onReady;
   final VoidCallback onDeviceCheck;
+  final bool noiseChecking;
+  final AmbientNoiseResult? noiseResult;
 
   @override
   Widget build(BuildContext context) {
@@ -840,9 +881,11 @@ class _ReadinessCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           const Text(
-            'Preview only — no recording or monitoring yet.',
+            'Rehearsal has not started. Noise samples are not saved or uploaded.',
             style: TextStyle(color: accentTeal, fontSize: 12),
           ),
+          const SizedBox(height: 12),
+          _AmbientNoiseStatus(checking: noiseChecking, result: noiseResult),
           const SizedBox(height: 16),
           FilledButton.icon(
             key: const Key('ready_rehearsal'),
@@ -871,15 +914,97 @@ class _ReadinessCard extends StatelessWidget {
   }
 }
 
+class _AmbientNoiseStatus extends StatelessWidget {
+  const _AmbientNoiseStatus({required this.checking, required this.result});
+
+  final bool checking;
+  final AmbientNoiseResult? result;
+
+  @override
+  Widget build(BuildContext context) {
+    final level = result?.level;
+    final firstCheck = checking && result == null;
+    final label = firstCheck
+        ? 'Checking...'
+        : switch (level) {
+            AmbientNoiseLevel.quiet => 'Quiet',
+            AmbientNoiseLevel.moderate => 'Moderate',
+            AmbientNoiseLevel.noisy => 'Noisy',
+            null => result == null ? 'Not checked' : 'Unavailable',
+          };
+    final message = firstCheck
+        ? 'Stay silent for about 3 seconds while we listen to the room.'
+        : switch (level) {
+            AmbientNoiseLevel.quiet => 'Quiet enough to begin.',
+            AmbientNoiseLevel.moderate =>
+              'Some background noise. A quieter spot may help.',
+            AmbientNoiseLevel.noisy =>
+              'Try a quieter place. You can still continue.',
+            null =>
+              result?.message ?? 'Check your surroundings before starting.',
+          };
+    final color = firstCheck || level == AmbientNoiseLevel.quiet
+        ? accentTeal
+        : warningOrange;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.graphic_eq_rounded, color: color, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Ambient noise: $label',
+                key: const Key('ambient_noise_status'),
+                style: TextStyle(color: color, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(message, style: const TextStyle(color: Color(0xFFBDD0E2))),
+        const SizedBox(height: 6),
+        const Text(
+          'Updates automatically before rehearsal. Stay silent to check the room.',
+          style: TextStyle(color: Color(0xFFBDD0E2), fontSize: 12),
+        ),
+      ],
+    );
+  }
+}
+
 class RehearsalScreen extends StatefulWidget {
   const RehearsalScreen({
     super.key,
     this.internetConnectivity,
     this.audioRecorder,
+    this.ambientNoiseService,
+    this.liveTranscriptionService,
+    this.liveChunkTemporaryDirectory,
+    this.liveFeedbackFactory,
+    this.screenAwakeController,
+    this.postureLandmarker,
+    this.postureThresholds = const PostureThresholds(),
+    this.posturePerformanceConfig = const PosturePerformanceConfig(),
   });
 
   final InternetConnectivity? internetConnectivity;
   final RehearsalAudioRecorder? audioRecorder;
+  final AmbientNoiseService? ambientNoiseService;
+  final GroqTranscriptionService? liveTranscriptionService;
+  final Future<Directory> Function()? liveChunkTemporaryDirectory;
+  final ScreenAwakeController? screenAwakeController;
+  final PostureLandmarker? postureLandmarker;
+  final PostureThresholds postureThresholds;
+  final PosturePerformanceConfig posturePerformanceConfig;
+  final LiveFillerFeedbackService Function(
+    GroqTranscriptionService,
+    void Function(String)?,
+    void Function(LivePaceUpdate)?,
+    Duration,
+  )?
+  liveFeedbackFactory;
 
   @override
   State<RehearsalScreen> createState() => _RehearsalScreenState();
@@ -888,6 +1013,7 @@ class RehearsalScreen extends StatefulWidget {
 class _RehearsalScreenState extends State<RehearsalScreen> {
   Timer? _timer;
   Timer? _alertTimer;
+  Timer? _performanceAlertTimer;
   Timer? _countdownTimer;
   int? _countdown;
   bool _hasStarted = false;
@@ -897,6 +1023,8 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   bool _leaving = false;
   AppLifecycleListener? _readinessLifecycle;
   late final InternetConnectivity _internetConnectivity;
+  late final ScreenAwakeController _screenAwakeController;
+  bool _screenAwake = false;
   int _elapsedSeconds = 0;
   int? _targetDurationSeconds;
   bool _targetDurationLoaded = false;
@@ -914,52 +1042,191 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   String? _audioRecordingError;
   Future<void>? _audioStartFuture;
   bool _ending = false;
-  String _pace = 'Normal';
-  String _posture = 'Good';
-  int _attention = 82;
-  final Map<String, int> _fillers = {};
+  String? _livePaceLabel;
+  double? _livePaceWpm;
+  int? _lastLivePaceUpdateSeconds;
+  // Display freshness only: final WPM and live rolling-average math are unchanged.
+  static const _livePaceValidity = Duration(seconds: 30);
+  String _posture = 'Position yourself';
+  bool _postureStreamActive = false;
+  bool _postureLandmarkerInitialized = false;
+  bool _visualStarting = false;
+  int _lastNativeFrameTimestamp = 0;
+  int _postureGeneration = 0;
+  late final PostureLandmarker _postureLandmarker;
+  late final PostureSessionTracker _postureTracker;
+  late final CameraFramingTracker _cameraFramingTracker;
+  late final CameraFramingSummaryTracker _framingSummary;
+  late final PostureWarningController _postureWarningController;
+  final CameraFramingWarningController _framingWarningController =
+      CameraFramingWarningController();
+  final PostureWarningController _faceMissingWarningController =
+      PostureWarningController();
+  final ValueNotifier<CameraFramingState?> _framingWarning = ValueNotifier(
+    null,
+  );
+  final ValueNotifier<PostureWarningType?> _faceMissingWarning = ValueNotifier(
+    null,
+  );
+  late final PoseFrameGate _postureFrameGate;
+  final PosePerformanceDiagnostics _postureDiagnostics =
+      PosePerformanceDiagnostics();
+  Timer? _postureDiagnosticsTimer;
+  final ValueNotifier<String> _postureStatus = ValueNotifier(
+    'Position yourself',
+  );
+  final ValueNotifier<PoseOverlayFrame?> _poseOverlayFrame = ValueNotifier(
+    null,
+  );
+  final ValueNotifier<bool> _showPoseLandmarks = ValueNotifier(false);
+  final ValueNotifier<CameraFramingState> _cameraFramingStatus = ValueNotifier(
+    CameraFramingState.unavailable,
+  );
+  final ValueNotifier<PostureWarningType?> _postureWarning = ValueNotifier(
+    null,
+  );
+  final Stopwatch _postureClock = Stopwatch();
+  final FaceAttentionTracker _faceTracker = FaceAttentionTracker();
+  final FaceAttentionWarningController _faceWarningController =
+      FaceAttentionWarningController();
+  final ValueNotifier<FaceAttentionState> _faceStatus = ValueNotifier(
+    FaceAttentionState.unavailable,
+  );
+  final ValueNotifier<bool> _faceWarning = ValueNotifier(false);
+  Timer? _faceWatchdog;
   final Map<String, int> _gestureCounts = {};
-  final List<String> _transcriptLines = [];
   late final RehearsalAudioRecorder _audioRecorder;
+  GroqTranscriptionService? _liveTranscriber;
+  LiveFillerFeedbackService? _liveFillerFeedback;
+  StreamSubscription<Uint8List>? _liveChunksSubscription;
+  late final AmbientNoiseService _ambientNoise;
+  AmbientNoiseResult? _noiseResult;
+  bool _noiseChecking = false;
+  bool _noiseAllowed = false;
+  bool _previewInForeground = true;
+  bool _cameraPreparationComplete = false;
+  int _noiseGeneration = 0;
+  Timer? _noiseRefreshTimer;
   final _microphoneLevel = ValueNotifier<double>(0);
   StreamSubscription<double>? _levelSubscription;
   final _transcriptionService = GroqTranscriptionService(
     apiKey: AppConfig.groqApiKey,
+    prompt: GroqTranscriptionService.fillerAwarePrompt,
   );
-  final _scriptComparisonService = const ScriptComparisonService();
-  final String _recommendedPosture =
-      'Maintain a steady upper-body posture and keep your eyes near the camera.';
   String? _alert;
+  String? _performanceAlert;
   Color _alertColor = primaryBlue;
   IconData _alertIcon = Icons.info_outline_rounded;
-
-  final List<String> _transcriptSamples = const [
-    'Today I will talk about why practice matters in every presentation, ano.',
-    'Using short pauses helps you stay clear parang avoiding filler words.',
-    'Make sure your shoulders are relaxed and your voice kuan stays steady.',
-    'Keep your eyes toward the camera kanang to build connection with the audience.',
-    'Repeat important phrases slowly and with confidence mura\'g like this.',
-    'End with a strong closing statement bitaw that ties your ideas together.',
-  ];
-
-  int get _fillerTotal =>
-      _fillers.values.fold<int>(0, (total, value) => total + value);
 
   @override
   void initState() {
     super.initState();
     _audioRecorder = widget.audioRecorder ?? RehearsalAudioRecorder();
+    _ambientNoise = widget.ambientNoiseService ?? AmbientNoiseService();
     _internetConnectivity =
         widget.internetConnectivity ?? const InternetConnectivityService();
+    _screenAwakeController =
+        widget.screenAwakeController ?? const ScreenAwakeService();
+    _postureLandmarker =
+        widget.postureLandmarker ?? MethodChannelPostureLandmarker();
+    _postureTracker = PostureSessionTracker(
+      thresholds: widget.postureThresholds,
+    );
+    _cameraFramingTracker = CameraFramingTracker();
+    _framingSummary = CameraFramingSummaryTracker(
+      maximumSampleGap: widget.postureThresholds.maximumSampleGap,
+    );
+    _postureWarningController = PostureWarningController();
+    _postureFrameGate = PoseFrameGate(
+      minimumInterval: widget.posturePerformanceConfig.analysisInterval,
+    );
     _readinessLifecycle = AppLifecycleListener(
       onInactive: () {
-        if (!_hasStarted && !_starting) _cancelCountdown();
+        if (!_hasStarted && !_starting) _cancelCountdown(resumeNoise: false);
+      },
+      onPause: () {
+        if (_hasStarted) {
+          unawaited(_disableScreenAwake());
+          unawaited(_stopPostureAnalysis(closeLandmarker: false));
+        }
+        if (!_hasStarted) {
+          _previewInForeground = false;
+          unawaited(_stopAmbientNoise());
+        }
+      },
+      onResume: () {
+        _previewInForeground = true;
+        if (_hasStarted && !_ending) {
+          unawaited(_enableScreenAwake());
+          unawaited(_startPostureAnalysis());
+        }
+        unawaited(_resumeAmbientNoise());
       },
     );
-    _prepareCamera();
+    // Avoid overlapping camera and microphone permission prompts.
+    unawaited(
+      _prepareCamera().then((_) {
+        _cameraPreparationComplete = true;
+        return _resumeAmbientNoise();
+      }),
+    );
   }
 
-  void _cancelCountdown() {
+  bool get _canSampleNoise =>
+      mounted &&
+      !_leaving &&
+      !_hasStarted &&
+      !_starting &&
+      !_checkingReadiness &&
+      _countdown == null &&
+      _previewInForeground &&
+      _cameraPreparationComplete &&
+      ModalRoute.of(context)?.isCurrent != false;
+
+  Future<void> _stopAmbientNoise() {
+    _noiseAllowed = false;
+    _noiseGeneration++;
+    _noiseRefreshTimer?.cancel();
+    _postureDiagnosticsTimer?.cancel();
+    return _ambientNoise.stop();
+  }
+
+  Future<void> _resumeAmbientNoise() async {
+    if (!_canSampleNoise) return;
+    if (_noiseChecking) await _stopAmbientNoise();
+    _noiseRefreshTimer?.cancel();
+    if (!_canSampleNoise) return;
+    _noiseAllowed = true;
+    await _checkAmbientNoise();
+  }
+
+  Future<void> _checkAmbientNoise() async {
+    if (!_canSampleNoise || _noiseChecking || !_noiseAllowed) {
+      return;
+    }
+    final generation = _noiseGeneration;
+    setState(() {
+      _noiseChecking = true;
+    });
+    final result = await _ambientNoise.check();
+    if (!mounted || _leaving) return;
+    setState(() {
+      _noiseChecking = false;
+      // An interrupted refresh must not replace a completed Noisy result
+      // just before the continue-anyway confirmation is evaluated.
+      if (generation == _noiseGeneration) _noiseResult = result;
+    });
+    if (_canSampleNoise && _noiseAllowed && generation == _noiseGeneration) {
+      _noiseRefreshTimer = Timer(
+        result.level == null
+            ? _ambientNoise.config.errorRetryDelay
+            : _ambientNoise.config.refreshDelay,
+        () => unawaited(_checkAmbientNoise()),
+      );
+    }
+  }
+
+  void _cancelCountdown({bool resumeNoise = true}) {
     _readinessGeneration++;
     _countdownTimer?.cancel();
     if (mounted) {
@@ -968,6 +1235,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
         _checkingReadiness = false;
       });
     }
+    if (resumeNoise) unawaited(_resumeAmbientNoise());
   }
 
   Future<void> _beginCountdown() async {
@@ -976,10 +1244,46 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     }
     final generation = ++_readinessGeneration;
     setState(() => _checkingReadiness = true);
+    await _stopAmbientNoise();
+    if (!mounted || _leaving || generation != _readinessGeneration) return;
+    if (_noiseResult?.level == AmbientNoiseLevel.noisy) {
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          scrollable: true,
+          title: const Text('Noisy environment'),
+          content: const Text(
+            'Background noise may affect your transcript. Move somewhere quieter, or continue anyway.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Go back'),
+            ),
+            FilledButton(
+              key: const Key('continue_noisy_rehearsal'),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Continue anyway'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || _leaving) return;
+      if (generation != _readinessGeneration) {
+        unawaited(_resumeAmbientNoise());
+        return;
+      }
+      if (proceed != true) {
+        setState(() => _checkingReadiness = false);
+        unawaited(_resumeAmbientNoise());
+        return;
+      }
+    }
     final online = await _checkInternet();
     if (!mounted || _leaving || generation != _readinessGeneration) return;
     setState(() => _checkingReadiness = false);
     if (!online) {
+      unawaited(_resumeAmbientNoise());
       _showAlert(
         'Internet is unavailable. Reconnect before starting speech processing.',
         warningOrange,
@@ -1009,11 +1313,17 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   Future<void> _startAfterCountdown() async {
     await _startAudioRecording();
     if (!mounted || _leaving) return;
+    _resetPostureSession();
+    _postureClock
+      ..reset()
+      ..start();
     setState(() {
       _elapsedSeconds = 0;
       _hasStarted = true;
       _starting = false;
     });
+    unawaited(_enableScreenAwake());
+    unawaited(_startPostureAnalysis());
     _timer = Timer.periodic(
       const Duration(seconds: 1),
       (_) => _handleTimerTick(),
@@ -1024,7 +1334,27 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     if (_hasStarted || _leaving) return;
     _leaving = true;
     _cancelCountdown();
+    unawaited(_disableScreenAwake());
     Navigator.of(context).pop();
+  }
+
+  Future<void> _enableScreenAwake() async {
+    if (_screenAwake) return;
+    try {
+      await _screenAwakeController.enable();
+      _screenAwake = true;
+    } catch (_) {
+      // Screen timeout is non-critical; rehearsal must keep running.
+    }
+  }
+
+  Future<void> _disableScreenAwake() async {
+    _screenAwake = false;
+    try {
+      await _screenAwakeController.disable();
+    } catch (_) {
+      // Never block navigation or cleanup on a platform wakelock error.
+    }
   }
 
   Future<bool> _checkInternet() async {
@@ -1040,7 +1370,9 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     _levelSubscription = null;
     if (!mounted || _leaving) return;
     _microphoneLevel.value = 0;
-    if (!AppConfig.hasGroqApiKey) {
+    // An injected transcriber is used by deterministic widget tests. Normal
+    // app runs still require GROQ_API_KEY before recording can begin.
+    if (!AppConfig.hasGroqApiKey && widget.liveTranscriptionService == null) {
       const message = 'Groq transcription is not configured on this device.';
       if (!mounted) return;
       setState(() {
@@ -1050,8 +1382,13 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       return;
     }
     try {
-      await _audioRecorder.start();
+      final setup = AppStateScope.of(context, listen: false).currentSetup!;
+      final useLiveChunks =
+          setup.enableLiveFeedback &&
+          (setup.monitorFillers || setup.monitorPace);
+      await _audioRecorder.start(enableLiveChunks: useLiveChunks);
       if (!mounted || _leaving) return;
+      if (useLiveChunks) _startLiveFillerFeedback();
       _levelSubscription = _audioRecorder.levels.listen(
         (level) {
           if (!mounted) return;
@@ -1088,6 +1425,89 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     }
   }
 
+  void _startLiveFillerFeedback() {
+    try {
+      final setup = AppStateScope.of(context, listen: false).currentSetup!;
+      final transcriber =
+          widget.liveTranscriptionService ??
+          GroqTranscriptionService(
+            apiKey: AppConfig.groqApiKey,
+            timeout: const Duration(seconds: 8),
+          );
+      void onFiller(String word) {
+        if (!mounted ||
+            !_hasStarted ||
+            _ending ||
+            _paused ||
+            _restarting ||
+            !_microphoneEnabled) {
+          return;
+        }
+        _showPerformanceAlert('Filler detected: $word');
+      }
+
+      void onPace(LivePaceUpdate update) {
+        if (!mounted ||
+            !_hasStarted ||
+            _ending ||
+            _paused ||
+            _restarting ||
+            !_microphoneEnabled) {
+          return;
+        }
+        setState(() {
+          _livePaceLabel = update.classification;
+          _livePaceWpm = update.wordsPerMinute;
+          _lastLivePaceUpdateSeconds = _elapsedSeconds;
+        });
+      }
+
+      final fillerCallback = setup.monitorFillers ? onFiller : null;
+      final paceCallback = setup.monitorPace ? onPace : null;
+
+      final feedback =
+          widget.liveFeedbackFactory?.call(
+            transcriber,
+            fillerCallback,
+            paceCallback,
+            _audioRecorder.chunkDuration,
+          ) ??
+          LiveFillerFeedbackService(
+            transcriber: transcriber,
+            temporaryDirectory: widget.liveChunkTemporaryDirectory,
+            onFiller: fillerCallback,
+            onPace: paceCallback,
+            chunkDuration: _audioRecorder.chunkDuration,
+          );
+      _liveTranscriber = transcriber;
+      _liveFillerFeedback = feedback;
+      _liveChunksSubscription = _audioRecorder.chunks.listen(feedback.accept);
+    } catch (_) {
+      // Live feedback is optional. The full recording remains available.
+      _liveTranscriber?.dispose();
+      _liveTranscriber = null;
+      _liveFillerFeedback = null;
+    }
+  }
+
+  Future<void> _stopLiveFillerFeedback() async {
+    final feedback = _liveFillerFeedback;
+    final transcriber = _liveTranscriber;
+    final subscription = _liveChunksSubscription;
+    _liveFillerFeedback = null;
+    _liveTranscriber = null;
+    _liveChunksSubscription = null;
+    _livePaceLabel = null;
+    _livePaceWpm = null;
+    _lastLivePaceUpdateSeconds = null;
+    await subscription?.cancel();
+    try {
+      await feedback?.stop();
+    } finally {
+      transcriber?.dispose();
+    }
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -1111,7 +1531,13 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     final target = _targetDurationSeconds;
     setState(() {
       _elapsedSeconds++;
-      if (_recording) _maybeAddTranscriptLine();
+      final lastPace = _lastLivePaceUpdateSeconds;
+      if (lastPace != null &&
+          _elapsedSeconds - lastPace >= _livePaceValidity.inSeconds) {
+        _livePaceLabel = null;
+        _livePaceWpm = null;
+        _lastLivePaceUpdateSeconds = null;
+      }
     });
 
     if (target == null) return;
@@ -1157,40 +1583,12 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     });
   }
 
-  void _simulatePostureAlert() {
-    _posture = 'Adjust';
-    _showAlert(
-      'Posture needs correction',
-      warningOrange,
-      icon: Icons.accessibility_new_rounded,
-    );
-  }
-
-  void _simulateCameraAttentionAlert() {
-    _attention = 64;
-    _showAlert(
-      'Look toward the camera',
-      warningOrange,
-      icon: Icons.visibility_outlined,
-    );
-  }
-
-  void _simulateFillerAlert() {
-    _fillers.update('Kuan', (count) => count + 1, ifAbsent: () => 1);
-    _showAlert(
-      'Filler word detected',
-      warningOrange,
-      icon: Icons.chat_bubble_outline_rounded,
-    );
-  }
-
-  void _simulateFastSpeechAlert() {
-    _pace = 'Too Fast';
-    _showAlert(
-      'Speaking too fast — slow down',
-      warningOrange,
-      icon: Icons.speed_rounded,
-    );
+  void _showPerformanceAlert(String message) {
+    _performanceAlertTimer?.cancel();
+    setState(() => _performanceAlert = message);
+    _performanceAlertTimer = Timer(const Duration(milliseconds: 2400), () {
+      if (mounted) setState(() => _performanceAlert = null);
+    });
   }
 
   Future<void> _prepareCamera() async {
@@ -1221,8 +1619,14 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
 
       _cameraController = CameraController(
         selectedCamera,
-        ResolutionPreset.max,
+        // `max` sent multi-megapixel YUV buffers across the platform channel
+        // for each pose request. `high` keeps a sharp preview while avoiding
+        // that unnecessary bandwidth on physical phones.
+        ResolutionPreset.high,
         enableAudio: false,
+        imageFormatGroup: Platform.isAndroid
+            ? ImageFormatGroup.yuv420
+            : ImageFormatGroup.bgra8888,
       );
       await _cameraController!.initialize();
       if (!mounted || _leaving) return;
@@ -1249,6 +1653,313 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
         _cameraReady = false;
         _cameraStatus = 'Unable to initialize camera. Error: $e';
       });
+    }
+  }
+
+  Future<void> _startPostureAnalysis() async {
+    if (!mounted || _ending || _paused || _visualStarting) return;
+    final setup = AppStateScope.of(context, listen: false).currentSetup;
+    if (!shouldRunPostureAnalysis(
+      monitoringEnabled:
+          setup?.monitorBodyLanguage == true ||
+          setup?.monitorCameraAttention == true,
+      rehearsalStarted: _hasStarted,
+      cameraReady: _cameraReady,
+      cameraEnabled: _cameraEnabled,
+    )) {
+      return;
+    }
+    final controller = _cameraController;
+    if (controller == null || !controller.value.isInitialized) return;
+    _visualStarting = true;
+    final generation = _postureGeneration;
+
+    try {
+      final landmarker = _postureLandmarker;
+      if (landmarker is CameraLandmarkerMonitoring) {
+        await (landmarker as CameraLandmarkerMonitoring)
+            .configureMonitoring(
+              pose: setup?.monitorBodyLanguage == true,
+              face: setup?.monitorCameraAttention == true,
+            )
+            .timeout(const Duration(seconds: 5));
+      }
+      if (!_postureLandmarkerInitialized) {
+        await _postureLandmarker.initialize().timeout(
+          const Duration(seconds: 5),
+        );
+        _postureLandmarkerInitialized = true;
+      }
+      if (!mounted) {
+        await _postureLandmarker.close().timeout(const Duration(seconds: 3));
+        _postureLandmarkerInitialized = false;
+        return;
+      }
+      if (generation != _postureGeneration ||
+          _ending ||
+          _paused ||
+          !_cameraEnabled) {
+        return;
+      }
+      if (!controller.value.isStreamingImages) {
+        await controller.startImageStream(_handlePostureCameraImage);
+      }
+      if (!mounted || generation != _postureGeneration) {
+        if (controller.value.isStreamingImages) {
+          await controller.stopImageStream();
+        }
+        return;
+      }
+      _postureStreamActive = true;
+      _faceWatchdog?.cancel();
+      _faceWatchdog = Timer.periodic(const Duration(milliseconds: 500), (_) {
+        if (!mounted || _ending || !_postureStreamActive) return;
+        _faceTracker.expire(_postureClock.elapsed);
+        _faceStatus.value = _faceTracker.status;
+        if (_faceTracker.status == FaceAttentionState.unavailable) {
+          _faceWarningController.reset();
+          _faceWarning.value = false;
+        }
+      });
+      _postureDiagnostics.start();
+      if (kDebugMode) {
+        _postureDiagnosticsTimer?.cancel();
+        _postureDiagnosticsTimer = Timer.periodic(
+          const Duration(seconds: 5),
+          (_) => debugPrint(
+            _postureDiagnostics.summary(
+              skippedFrames: _postureFrameGate.skippedFrames,
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      debugPrint('Posture analysis unavailable: $error');
+      if (!mounted) return;
+      _postureStreamActive = false;
+      _posture = 'Unavailable';
+      _postureStatus.value = _posture;
+      _poseOverlayFrame.value = null;
+      _interruptFaceAnalysis();
+    } finally {
+      _visualStarting = false;
+      if (mounted &&
+          !_ending &&
+          !_paused &&
+          _cameraEnabled &&
+          generation != _postureGeneration) {
+        unawaited(_startPostureAnalysis());
+      }
+    }
+  }
+
+  Future<void> _stopPostureAnalysis({bool closeLandmarker = false}) async {
+    _postureGeneration++;
+    _postureStreamActive = false;
+    _faceWatchdog?.cancel();
+    _faceWatchdog = null;
+    _interruptFaceAnalysis();
+    if (kDebugMode && _postureDiagnostics.processedFrames > 0) {
+      debugPrint(
+        _postureDiagnostics.summary(
+          skippedFrames: _postureFrameGate.skippedFrames,
+        ),
+      );
+    }
+    _postureFrameGate.reset();
+    _postureDiagnostics.reset();
+    _postureDiagnosticsTimer?.cancel();
+    _postureDiagnosticsTimer = null;
+    _poseOverlayFrame.value = null;
+    _showPoseLandmarks.value = false;
+    _resetPostureWarning();
+    _cameraFramingTracker.reset();
+    _framingSummary.interrupt();
+    _cameraFramingStatus.value = CameraFramingState.unavailable;
+    _framingWarningController.reset();
+    _framingWarning.value = null;
+    final controller = _cameraController;
+    if (controller?.value.isStreamingImages == true) {
+      try {
+        await controller!.stopImageStream();
+      } catch (_) {
+        // Camera cleanup is best-effort and must never block the rehearsal.
+      }
+    }
+    // Configuration may have loaded Face even when Pose initialization failed.
+    if (closeLandmarker) {
+      try {
+        await _postureLandmarker.close().timeout(const Duration(seconds: 3));
+      } catch (_) {
+        // Native cleanup is best-effort.
+      }
+      _postureLandmarkerInitialized = false;
+    }
+  }
+
+  void _resetPostureSession() {
+    _faceTracker.reset();
+    _faceWarningController.reset();
+    _faceStatus.value = FaceAttentionState.unavailable;
+    _faceWarning.value = false;
+    _postureTracker.reset();
+    _cameraFramingTracker.reset();
+    _framingSummary.reset();
+    _framingWarningController.reset();
+    _framingWarning.value = null;
+    _faceMissingWarningController.reset();
+    _faceMissingWarning.value = null;
+    _postureWarningController.reset();
+    _postureFrameGate.reset();
+    _postureDiagnostics.reset();
+    _poseOverlayFrame.value = null;
+    _showPoseLandmarks.value = false;
+    _cameraFramingStatus.value = CameraFramingState.unavailable;
+    _postureWarning.value = null;
+    _posture = 'Position yourself';
+    _postureStatus.value = _posture;
+  }
+
+  void _resetPostureWarning() {
+    final update = _postureWarningController.reset();
+    if (update.changed || _postureWarning.value != null) {
+      _postureWarning.value = null;
+    }
+  }
+
+  void _handlePostureCameraImage(CameraImage image) {
+    if (!_postureStreamActive || _paused || _ending || !_cameraEnabled) {
+      return;
+    }
+    if (!_postureFrameGate.tryAcquire(_postureClock.elapsed)) return;
+    final generation = _postureGeneration;
+    unawaited(_analyzePostureFrame(image, generation));
+  }
+
+  void _interruptFaceAnalysis() {
+    _faceTracker.interrupt();
+    _faceMissingWarningController.reset();
+    _faceMissingWarning.value = null;
+    _faceWarningController.reset();
+    _faceStatus.value = FaceAttentionState.unavailable;
+    _faceWarning.value = false;
+  }
+
+  Future<void> _analyzePostureFrame(CameraImage image, int generation) async {
+    try {
+      final controller = _cameraController;
+      if (controller == null) return;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final timestamp = now <= _lastNativeFrameTimestamp
+          ? _lastNativeFrameTimestamp + 1
+          : now;
+      _lastNativeFrameTimestamp = timestamp;
+      final sampleTime = _postureClock.elapsed;
+      final result = await _postureLandmarker
+          .analyze(
+            image: image,
+            rotationDegrees: cameraImageRotationDegrees(
+              controller.description,
+              controller.value.deviceOrientation,
+            ),
+            mirrorHorizontally:
+                controller.description.lensDirection ==
+                CameraLensDirection.front,
+            timestampMilliseconds: timestamp,
+            maximumInferenceDimension:
+                widget.posturePerformanceConfig.maximumInferenceDimension,
+          )
+          .timeout(const Duration(seconds: 3));
+      if (!mounted ||
+          generation != _postureGeneration ||
+          !_postureStreamActive ||
+          _ending) {
+        return;
+      }
+      _postureDiagnostics.recordProcessed(
+        processingDuration: result.processingDuration,
+        conversionDuration: result.conversionDuration,
+        inferenceDuration: result.inferenceDuration,
+      );
+      final setup = AppStateScope.of(context, listen: false).currentSetup!;
+      if (setup.monitorCameraAttention) {
+        final fresh =
+            _postureClock.elapsed - sampleTime <=
+            _faceTracker.thresholds.maximumSampleGap;
+        final faceState = _faceTracker.addFrame(
+          fresh ? result.face : null,
+          sampleTime,
+        );
+        _faceStatus.value = faceState;
+        _faceMissingWarning.value = _faceMissingWarningController
+            .update(
+              faceState == FaceAttentionState.unavailable
+                  ? PostureWarningSignal.unavailable
+                  : PostureWarningSignal.good,
+              sampleTime,
+            )
+            .warning;
+        _faceWarning.value = _faceWarningController.update(
+          faceState,
+          sampleTime,
+          liveAlertsEnabled: setup.enableLiveFeedback,
+        );
+      }
+      if (!setup.monitorBodyLanguage) return;
+      final landmarks = result.landmarks;
+      _poseOverlayFrame.value = landmarks == null
+          ? null
+          : PoseOverlayFrame(
+              landmarks: landmarks,
+              imageWidth: result.inferenceWidth,
+              imageHeight: result.inferenceHeight,
+              mirrorHorizontally:
+                  controller.description.lensDirection ==
+                  CameraLensDirection.front,
+            );
+      final frameClassification = _postureTracker.analyzer
+          .analyze(landmarks)
+          .classification;
+      final status = _postureTracker.addFrame(landmarks, _postureClock.elapsed);
+      final label = switch (status) {
+        PostureDisplayStatus.good => 'Good',
+        PostureDisplayStatus.adjust => 'Adjust',
+        PostureDisplayStatus.positionYourself => 'Position yourself',
+      };
+      if (_posture != label) {
+        _posture = label;
+        _postureStatus.value = label;
+      }
+      final warningSignal =
+          frameClassification == PostureFrameClassification.invalid
+          ? PostureWarningSignal.unavailable
+          : status == PostureDisplayStatus.adjust
+          ? PostureWarningSignal.adjust
+          : PostureWarningSignal.good;
+      final warningUpdate = _postureWarningController.update(
+        warningSignal,
+        _postureClock.elapsed,
+      );
+      if (warningUpdate.changed) {
+        _postureWarning.value = warningUpdate.warning;
+      }
+
+      final framing = _cameraFramingTracker.update(landmarks).state;
+      _framingSummary.addFrame(framing, _postureClock.elapsed);
+      _framingWarning.value = _framingWarningController.update(
+        framing,
+        _postureClock.elapsed,
+      );
+      if (_cameraFramingStatus.value != framing) {
+        _cameraFramingStatus.value = framing;
+      }
+    } catch (_) {
+      // A dropped/invalid frame is not bad posture. Keep the rehearsal alive
+      // and let subsequent camera frames recover. Avoid frame-loop log spam.
+      if (mounted && generation == _postureGeneration) _interruptFaceAnalysis();
+      if (generation == _postureGeneration) _framingSummary.interrupt();
+    } finally {
+      if (generation == _postureGeneration) _postureFrameGate.complete();
     }
   }
 
@@ -1317,6 +2028,13 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
         setState(() {
           _microphoneEnabled = !_microphoneEnabled;
           _recording = _microphoneEnabled;
+          if (!_microphoneEnabled) {
+            _livePaceLabel = null;
+            _livePaceWpm = null;
+            _lastLivePaceUpdateSeconds = null;
+            _performanceAlertTimer?.cancel();
+            _performanceAlert = null;
+          }
         });
       }
     } catch (_) {
@@ -1416,26 +2134,33 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   }
 
   Future<void> _restartRehearsal() async {
+    await _stopPostureAnalysis();
+    _resetPostureSession();
+    _postureClock
+      ..reset()
+      ..start();
     _microphoneLevel.value = 0;
     await _levelSubscription?.cancel();
     _levelSubscription = null;
     await _audioRecorder.discard();
+    await _stopLiveFillerFeedback();
     if (!mounted) return;
     _alertTimer?.cancel();
+    _performanceAlertTimer?.cancel();
     setState(() {
       _elapsedSeconds = 0;
-      _fillers.clear();
       _gestureCounts.clear();
-      _transcriptLines.clear();
-      _pace = 'Normal';
-      _posture = 'Good';
-      _attention = 82;
+      _livePaceLabel = null;
+      _livePaceWpm = null;
+      _lastLivePaceUpdateSeconds = null;
       _thirtySecondWarningShown = false;
       _alert = null;
+      _performanceAlert = null;
       _recording = false;
     });
     await _startAudioRecording();
     if (!mounted) return;
+    unawaited(_startPostureAnalysis());
     // Give the new attempt a full first second, independent of the old timer.
     _timer?.cancel();
     _timer = Timer.periodic(
@@ -1455,57 +2180,17 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
 
     try {
       if (_cameraEnabled) {
+        await _stopPostureAnalysis();
         await controller.pausePreview();
       } else {
         await controller.resumePreview();
       }
-      if (mounted) setState(() => _cameraEnabled = !_cameraEnabled);
+      if (mounted) {
+        setState(() => _cameraEnabled = !_cameraEnabled);
+        if (_cameraEnabled) unawaited(_startPostureAnalysis());
+      }
     } on CameraException {
       _showAlert('Unable to change the camera state.', errorRed);
-    }
-  }
-
-  void _maybeAddTranscriptLine() {
-    if (_transcriptLines.length >= _transcriptSamples.length) return;
-    if (_elapsedSeconds == 0 || _elapsedSeconds % 5 != 0) return;
-    final nextLine = _transcriptSamples[_transcriptLines.length];
-    _transcriptLines.add(nextLine);
-    final setup = AppStateScope.of(context, listen: false).currentSetup!;
-
-    // Prototype signals stand in for the on-device vision analysis planned for
-    // production. They keep the feedback treatment testable without audio.
-    if (_transcriptLines.length == 3 && setup.monitorBodyLanguage) {
-      _posture = 'Adjust';
-      _showAlert(
-        'Posture needs correction',
-        warningOrange,
-        icon: Icons.accessibility_new_rounded,
-      );
-      return;
-    } else if (_transcriptLines.length == 4 && setup.monitorCameraAttention) {
-      _attention = 64;
-      _showAlert(
-        'Look toward the camera',
-        warningOrange,
-        icon: Icons.visibility_outlined,
-      );
-      return;
-    }
-
-    if (!setup.monitorFillers) return;
-    const fillerWords = ['ano', 'parang', 'kuan', 'kanang', 'mura\'g', 'bitaw'];
-    final normalizedLine = nextLine.toLowerCase();
-    for (final filler in fillerWords) {
-      if (normalizedLine.contains(RegExp('\\b${RegExp.escape(filler)}\\b'))) {
-        final label = filler[0].toUpperCase() + filler.substring(1);
-        _fillers.update(label, (count) => count + 1, ifAbsent: () => 1);
-        _showAlert(
-          'Filler word detected',
-          warningOrange,
-          icon: Icons.chat_bubble_outline_rounded,
-        );
-        return;
-      }
     }
   }
 
@@ -1546,8 +2231,16 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   Future<void> _finishRehearsal() async {
     if (!_hasStarted || _ending) return;
     _ending = true;
+    // Releasing the platform wake lock must not delay report generation.
+    unawaited(_disableScreenAwake());
     _microphoneLevel.value = 0;
     _timer?.cancel();
+    _postureClock.stop();
+    await _stopPostureAnalysis(closeLandmarker: true);
+    final postureSummary = _postureTracker.summary;
+    final posturePercentage = postureSummary.acceptablePercentage;
+    final postureScore = posturePercentage?.round();
+    final faceSummary = _faceTracker.summary;
     if (mounted) setState(() => _transcribing = true);
     if (_cameraController?.value.isRecordingVideo == true) {
       try {
@@ -1559,7 +2252,6 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     if (!mounted) return;
     final state = AppStateScope.of(context, listen: false);
     final setup = state.currentSetup!;
-    final overall = _calculateOverall();
     String? audioPath;
     String? transcript;
     String? transcriptionError;
@@ -1571,6 +2263,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
         );
       }
       audioPath = await _audioRecorder.stop();
+      await _stopLiveFillerFeedback();
       if (audioPath == null || audioPath.trim().isEmpty) {
         throw const AudioRecordingException('No rehearsal audio was recorded.');
       }
@@ -1589,6 +2282,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       transcriptionError =
           'Transcription failed. The rehearsal report can still continue.';
     } finally {
+      await _stopLiveFillerFeedback();
       await _audioRecorder.deleteTemporaryFile(audioPath);
     }
     if (!mounted) return;
@@ -1596,15 +2290,26 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     final shouldCompareScript =
         (setup.speechType == 'Prepared' || setup.speechType == 'Persuasive') &&
         referenceScript != null &&
-        referenceScript.isNotEmpty &&
-        transcript != null &&
-        transcript.isNotEmpty;
-    final comparison = shouldCompareScript
-        ? _scriptComparisonService.compare(
-            referenceScript: referenceScript,
-            transcript: transcript,
-          )
-        : null;
+        referenceScript.isNotEmpty;
+    ScriptComparisonResult? comparison;
+    if (shouldCompareScript) {
+      try {
+        comparison = await compute(
+          ScriptComparisonService.compareInput,
+          <String, String?>{
+            'reference': referenceScript,
+            'transcript': transcript,
+          },
+        );
+      } catch (_) {
+        comparison = const ScriptComparisonResult(
+          status: 'failed',
+          totalReferenceWords: 0,
+          matchedReferenceWords: 0,
+        );
+      }
+    }
+    if (!mounted) return;
     final session = PracticeSession(
       id: 'session-${DateTime.now().microsecondsSinceEpoch}',
       title: setup.speechTitle,
@@ -1612,16 +2317,37 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       languageMode: setup.languageMode,
       dateTime: DateTime.now(),
       duration: Duration(seconds: _elapsedSeconds),
-      overallScore: overall,
-      paceScore: _pace == 'Normal' ? 94 : 72,
-      fillerScore: (100 - _fillerTotal * 7).clamp(0, 100),
-      postureScore: _posture == 'Good' ? 95 : 72,
-      attentionScore: _attention,
+      monitorPace: setup.monitorPace,
+      monitorFillers: setup.monitorFillers,
+      monitorBodyLanguage: setup.monitorBodyLanguage,
+      monitorCameraAttention: setup.monitorCameraAttention,
+      cameraFramingMilliseconds: setup.monitorBodyLanguage
+          ? _framingSummary.milliseconds
+          : null,
+      overallScore: null,
+      paceScore: null,
+      fillerScore: null,
+      postureScore: postureScore,
+      goodPostureSeconds: postureScore == null
+          ? null
+          : postureSummary.acceptableDuration.inSeconds,
+      validPostureSeconds: postureSummary.validDuration.inSeconds,
+      attentionScore: setup.monitorCameraAttention
+          ? faceSummary.percentage?.round()
+          : null,
+      cameraFacingSeconds:
+          setup.monitorCameraAttention && faceSummary.percentage != null
+          ? faceSummary.facingDuration.inSeconds
+          : null,
+      validFaceAnalysisMilliseconds: setup.monitorCameraAttention
+          ? faceSummary.validDuration.inMilliseconds
+          : null,
       fillerCounts: FillerAnalysis.fromTranscript(
         transcript,
         Duration(seconds: _elapsedSeconds),
       ).counts,
-      coachingTips: _buildTips(),
+      // UI/storage derive coaching from final measured data, not prototype scores.
+      coachingTips: const [],
       textTranscript: transcript,
       referenceScript: shouldCompareScript ? referenceScript : null,
       referenceDocumentName: shouldCompareScript
@@ -1631,9 +2357,10 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       addedTranscriptPortions: comparison?.addedPortions ?? const [],
       differentlyDeliveredPortions:
           comparison?.differentlyDeliveredPortions ?? const [],
-      transcriptLines: List.unmodifiable(_transcriptLines),
+      totalScriptWords: comparison?.totalReferenceWords,
+      matchedScriptWords: comparison?.matchedReferenceWords,
+      scriptComparisonStatus: comparison?.status,
       gestureCounts: Map.unmodifiable(_gestureCounts),
-      recommendedPosture: _recommendedPosture,
       isPrototypeData: true,
     );
     state.setCurrentReport(session);
@@ -1646,53 +2373,21 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     );
   }
 
-  int _calculateOverall() {
-    var score = 100 - (_fillerTotal * 3);
-    if (_posture != 'Good') score -= 8;
-    if (_attention < 70) score -= 70 - _attention;
-    if (_pace == 'Too Fast') score -= 8;
-    return score.clamp(0, 100);
-  }
-
-  List<String> _buildTips() {
-    final tips = <String>[];
-    if (_fillerTotal > 0) {
-      tips.add(
-        'Try taking a quick breath instead of using a filler word. Silence feels much shorter to the audience than it does to you.',
-      );
-    }
-    if (_posture != 'Good') {
-      tips.add(
-        'Your posture shifted noticeably during the recording. Plant your feet shoulder-width apart to project more authority and stabilize your frame.',
-      );
-    }
-    if (_attention < 75) {
-      tips.add(
-        'You broke eye contact with the camera frequently. Try visualizing a single friendly face right behind the lens to maintain a stronger connection.',
-      );
-    }
-    if (_pace != 'Normal') {
-      tips.add(
-        'Your pacing felt rushed in sections. Practice "chunking" your sentences into smaller phrases and fully stopping at the periods.',
-      );
-    }
-    if (tips.isEmpty) {
-      tips.add(
-        'Excellent pacing and strong eye contact! Your delivery felt highly polished. For an even greater impact next time, try using hand gestures to emphasize your most important points.',
-      );
-    }
-    return tips;
-  }
-
   @override
   void dispose() {
     _timer?.cancel();
     _alertTimer?.cancel();
+    _performanceAlertTimer?.cancel();
     _countdownTimer?.cancel();
     _readinessLifecycle?.dispose();
+    _noiseRefreshTimer?.cancel();
     _levelSubscription?.cancel();
     _microphoneLevel.dispose();
-    _cameraController?.dispose();
+    _postureClock.stop();
+    unawaited(_disposeCameraAndPosture());
+    unawaited(_ambientNoise.dispose());
+    unawaited(_stopLiveFillerFeedback());
+    unawaited(_disableScreenAwake());
     unawaited(_disposeAudioRecorder());
     _transcriptionService.dispose();
     super.dispose();
@@ -1704,12 +2399,40 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     await _audioRecorder.dispose();
   }
 
+  Future<void> _disposeCameraAndPosture() async {
+    await _stopPostureAnalysis(closeLandmarker: true);
+    await _cameraController?.dispose();
+    _postureStatus.dispose();
+    _poseOverlayFrame.dispose();
+    _showPoseLandmarks.dispose();
+    _cameraFramingStatus.dispose();
+    _postureWarning.dispose();
+    _framingWarning.dispose();
+    _faceMissingWarning.dispose();
+    _faceStatus.dispose();
+    _faceWarning.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final setup = AppStateScope.of(context).currentSetup!;
     final displayedSeconds = _remainingSeconds;
     final minutes = (displayedSeconds ~/ 60).toString().padLeft(2, '0');
     final seconds = (displayedSeconds % 60).toString().padLeft(2, '0');
+    final livePaceEnabled = setup.enableLiveFeedback && setup.monitorPace;
+    final paceValue = !setup.monitorPace
+        ? 'Off'
+        : livePaceEnabled
+        ? (_livePaceLabel == null ? 'Listening...' : 'Pace: $_livePaceLabel')
+        : 'After session';
+    final paceIsGood = livePaceEnabled
+        ? _livePaceLabel == null || _livePaceLabel == 'Target'
+        : false;
+    final paceDescription = livePaceEnabled
+        ? (_livePaceWpm == null
+              ? 'Analyzing recent speech'
+              : '${_livePaceWpm!.toStringAsFixed(0)} WPM recent average')
+        : 'Live pace is off; final WPM uses your full transcript';
     return PopScope(
       canPop: !_hasStarted,
       onPopInvokedWithResult: (didPop, result) {
@@ -1777,114 +2500,85 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                   maxWidth: 760,
                   child: Column(
                     children: [
-                      Stack(
-                        clipBehavior: Clip.none,
-                        alignment: Alignment.bottomCenter,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 28),
-                            child: _CameraStage(
-                              controller: _cameraController,
-                              cameraReady: _cameraReady,
-                              cameraEnabled: _cameraEnabled,
-                              cameraStatus: _cameraStatus,
-                              recording:
-                                  _hasStarted &&
-                                  _recording &&
-                                  !_restarting &&
-                                  !_ending,
-                            ),
+                      Center(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: _cameraFrameWidth(context),
                           ),
-                          if (_alert != null &&
-                              (!_hasStarted || setup.enableLiveFeedback))
-                            Positioned(
-                              top: 12,
-                              left: 12,
-                              right: 12,
-                              child: Center(
-                                child: AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 180),
-                                  child: Container(
-                                    key: ValueKey(_alert),
-                                    width: double.infinity,
-                                    constraints: const BoxConstraints(
-                                      maxWidth: 360,
-                                    ),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 8,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xE61A2938),
-                                      borderRadius: BorderRadius.circular(20),
-                                      border: Border.all(
-                                        color: _alertColor.withValues(
-                                          alpha: .55,
-                                        ),
-                                      ),
-                                      boxShadow: const [
-                                        BoxShadow(
-                                          color: Color(0x33000000),
-                                          blurRadius: 8,
-                                          offset: Offset(0, 2),
-                                        ),
-                                      ],
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          _alertIcon,
-                                          color: _alertColor,
-                                          size: 17,
-                                        ),
-                                        const SizedBox(width: 7),
-                                        Flexible(
-                                          child: Text(
-                                            _alert!,
-                                            maxLines: 2,
-                                            softWrap: true,
-                                            overflow: TextOverflow.visible,
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            alignment: Alignment.bottomCenter,
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 28),
+                                child: _CameraStage(
+                                  controller: _cameraController,
+                                  cameraReady: _cameraReady,
+                                  cameraEnabled: _cameraEnabled,
+                                  cameraStatus: _cameraStatus,
+                                  recording:
+                                      _hasStarted &&
+                                      _recording &&
+                                      !_restarting &&
+                                      !_ending,
+                                  showPoseLandmarks: _showPoseLandmarks,
+                                  poseOverlayFrames: _poseOverlayFrame,
+                                  feedback: LiveFeedbackOverlay(
+                                    enabled:
+                                        !_ending &&
+                                        !_paused &&
+                                        !_restarting &&
+                                        (!_hasStarted ||
+                                            setup.enableLiveFeedback),
+                                    visualEnabled:
+                                        _hasStarted && _cameraEnabled,
+                                    monitorBodyLanguage:
+                                        setup.monitorBodyLanguage,
+                                    monitorCameraAttention:
+                                        setup.monitorCameraAttention,
+                                    faceWarning: _faceWarning,
+                                    faceMissingWarning: _faceMissingWarning,
+                                    postureWarning: _postureWarning,
+                                    framingWarning: _framingWarning,
+                                    systemMessage: _alert,
+                                    systemColor: _alertColor,
+                                    systemIcon: _alertIcon,
+                                    temporaryMessage: _performanceAlert,
+                                    temporaryColor: warningOrange,
+                                    temporaryIcon:
+                                        Icons.chat_bubble_outline_rounded,
                                   ),
                                 ),
                               ),
-                            ),
-                          if (_hasStarted)
-                            Positioned(
-                              left: 12,
-                              bottom: 48,
-                              child: ValueListenableBuilder<double>(
-                                valueListenable: _microphoneLevel,
-                                builder: (context, level, child) =>
-                                    _MicrophoneLevelIndicator(
-                                      enabled:
-                                          _microphoneEnabled &&
-                                          _audioRecorder.hasStarted &&
-                                          !_ending,
-                                      level: level,
-                                    ),
-                              ),
-                            ),
-                          if (_hasStarted)
-                            Positioned(
-                              bottom: 0,
-                              child: _MediaControls(
-                                microphoneEnabled: _microphoneEnabled,
-                                cameraEnabled: _cameraEnabled,
-                                onMicrophonePressed: _toggleMicrophone,
-                                onCameraPressed: _toggleCamera,
-                              ),
-                            ),
-                        ],
+                              if (_hasStarted)
+                                Positioned(
+                                  left: 12,
+                                  bottom: 48,
+                                  child: ValueListenableBuilder<double>(
+                                    valueListenable: _microphoneLevel,
+                                    builder: (context, level, child) =>
+                                        _MicrophoneLevelIndicator(
+                                          enabled:
+                                              _microphoneEnabled &&
+                                              _audioRecorder.hasStarted &&
+                                              !_ending,
+                                          level: level,
+                                        ),
+                                  ),
+                                ),
+                              if (_hasStarted)
+                                Positioned(
+                                  bottom: 0,
+                                  child: _MediaControls(
+                                    microphoneEnabled: _microphoneEnabled,
+                                    cameraEnabled: _cameraEnabled,
+                                    onMicrophonePressed: _toggleMicrophone,
+                                    onCameraPressed: _toggleCamera,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
                       ),
                       if (!_hasStarted) ...[
                         _ReadinessCard(
@@ -1893,23 +2587,37 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                               _checkingReadiness ||
                               _countdown != null,
                           starting: _starting,
+                          noiseChecking: _noiseChecking,
+                          noiseResult: _noiseResult,
                           onReady: _beginCountdown,
-                          onDeviceCheck: () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => const DeviceCheckScreen(
-                                returnToPreview: true,
+                          onDeviceCheck: () async {
+                            final generation = ++_readinessGeneration;
+                            setState(() => _checkingReadiness = true);
+                            await _stopAmbientNoise();
+                            if (!context.mounted ||
+                                _leaving ||
+                                generation != _readinessGeneration) {
+                              return;
+                            }
+                            await Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => const DeviceCheckScreen(
+                                  returnToPreview: true,
+                                ),
                               ),
-                            ),
-                          ),
+                            );
+                            if (mounted && !_leaving) {
+                              setState(() => _checkingReadiness = false);
+                              unawaited(_resumeAmbientNoise());
+                            }
+                          },
                         ),
                       ],
                       if (_hasStarted) ...[
                         const SizedBox(height: 10),
-                        if (setup.enableLiveFeedback) ...[
+                        if (kDebugMode && setup.monitorBodyLanguage) ...[
                           Container(
-                            key: const Key('prototype_alert_controls'),
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(12),
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
                             decoration: BoxDecoration(
                               color: const Color(0xFF10243A),
                               borderRadius: BorderRadius.circular(14),
@@ -1917,118 +2625,116 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                                 color: const Color(0xFF29435E),
                               ),
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Test live alerts',
-                                  style: TextStyle(
-                                    color: Color(0xFFB9C9D9),
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
+                            child: ValueListenableBuilder<bool>(
+                              valueListenable: _showPoseLandmarks,
+                              builder: (context, show, child) =>
+                                  PoseOverlayDebugToggle(
+                                    value: show,
+                                    onChanged: (value) {
+                                      _showPoseLandmarks.value = value;
+                                    },
                                   ),
-                                ),
-                                const SizedBox(height: 8),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
-                                    if (setup.monitorBodyLanguage)
-                                      _AlertTestButton(
-                                        key: const Key('test_posture_alert'),
-                                        icon: Icons.accessibility_new_rounded,
-                                        label: 'Posture',
-                                        onPressed: _simulatePostureAlert,
-                                      ),
-                                    if (setup.monitorCameraAttention)
-                                      _AlertTestButton(
-                                        key: const Key('test_camera_alert'),
-                                        icon: Icons.visibility_outlined,
-                                        label: 'Camera gaze',
-                                        onPressed:
-                                            _simulateCameraAttentionAlert,
-                                      ),
-                                    if (setup.monitorFillers)
-                                      _AlertTestButton(
-                                        key: const Key('test_filler_alert'),
-                                        icon: Icons.chat_bubble_outline_rounded,
-                                        label: 'Filler word',
-                                        onPressed: _simulateFillerAlert,
-                                      ),
-                                    if (setup.monitorPace)
-                                      _AlertTestButton(
-                                        key: const Key(
-                                          'test_fast_speech_alert',
-                                        ),
-                                        icon: Icons.speed_rounded,
-                                        label: 'Fast speech',
-                                        onPressed: _simulateFastSpeechAlert,
-                                      ),
-                                  ],
-                                ),
-                              ],
                             ),
                           ),
                           const SizedBox(height: 12),
                         ],
-                        GridView.count(
-                          crossAxisCount: 2,
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          mainAxisSpacing: 10,
-                          crossAxisSpacing: 10,
-                          childAspectRatio: 1.35,
+                        ResponsiveCardGrid(
+                          spacing: 10,
                           children: [
                             _LiveMetric(
+                              key: const Key('live_pace_metric'),
                               label: 'Speaking Pace',
-                              value: setup.monitorPace ? _pace : 'Off',
+                              value: paceValue,
                               icon: Icons.speed_rounded,
-                              good: _pace == 'Normal',
-                              enabled: setup.monitorPace,
-                              progress: _pace == 'Normal' ? .82 : .42,
-                              description: _pace == 'Normal'
-                                  ? 'Good speaking rhythm'
-                                  : 'Slow down slightly',
+                              good: paceIsGood,
+                              enabled:
+                                  livePaceEnabled && _livePaceLabel != null,
+                              progress: null,
+                              description: paceDescription,
                             ),
-                            _LiveMetric(
-                              label: 'Posture',
-                              value: setup.monitorBodyLanguage
-                                  ? _posture
-                                  : 'Off',
-                              icon: Icons.accessibility_new_rounded,
-                              good: _posture == 'Good',
-                              enabled: setup.monitorBodyLanguage,
-                              progress: _posture == 'Good' ? .9 : .48,
-                              description: _posture == 'Good'
-                                  ? 'Upper body is steady'
-                                  : 'Straighten your posture',
+                            ValueListenableBuilder<String>(
+                              valueListenable: _postureStatus,
+                              builder: (context, posture, child) => _LiveMetric(
+                                label: 'Posture',
+                                value: setup.monitorBodyLanguage
+                                    ? posture
+                                    : 'Off',
+                                icon: Icons.accessibility_new_rounded,
+                                good: posture == 'Good',
+                                enabled: setup.monitorBodyLanguage,
+                                progress: posture == 'Good'
+                                    ? .9
+                                    : posture == 'Adjust'
+                                    ? .48
+                                    : 0,
+                                description: switch (posture) {
+                                  'Good' => 'Upper body is steady',
+                                  'Adjust' => 'Straighten your posture',
+                                  'Unavailable' =>
+                                    'Posture analysis is unavailable',
+                                  _ => 'Keep shoulders and hips visible',
+                                },
+                              ),
                             ),
-                            _LiveMetric(
-                              label: 'Camera Attention',
-                              value: setup.monitorCameraAttention
-                                  ? '$_attention%'
-                                  : 'Off',
-                              icon: Icons.center_focus_strong,
-                              good: _attention >= 70,
-                              enabled: setup.monitorCameraAttention,
-                              progress: _attention / 100,
-                              description: _attention >= 70
-                                  ? 'Strong camera focus'
-                                  : 'Look toward the camera',
+                            ValueListenableBuilder<CameraFramingState>(
+                              valueListenable: _cameraFramingStatus,
+                              builder: (context, framing, child) => _LiveMetric(
+                                key: const Key('camera_position_metric'),
+                                label: 'Camera Position',
+                                value: setup.monitorBodyLanguage
+                                    ? cameraFramingLabel(framing)
+                                    : 'Off',
+                                icon: Icons.fit_screen_rounded,
+                                good: framing == CameraFramingState.proper,
+                                enabled: setup.monitorBodyLanguage,
+                                progress: switch (framing) {
+                                  CameraFramingState.tooClose => .2,
+                                  CameraFramingState.proper => .5,
+                                  CameraFramingState.tooFar => .8,
+                                  CameraFramingState.unavailable => 0,
+                                },
+                                description: switch (framing) {
+                                  CameraFramingState.tooClose =>
+                                    'Move slightly farther away',
+                                  CameraFramingState.proper =>
+                                    'Upper body is framed well',
+                                  CameraFramingState.tooFar =>
+                                    'Move slightly closer',
+                                  CameraFramingState.unavailable =>
+                                    'Keep shoulders and hips visible',
+                                },
+                              ),
+                            ),
+                            ValueListenableBuilder<FaceAttentionState>(
+                              valueListenable: _faceStatus,
+                              builder: (context, face, child) => _LiveMetric(
+                                key: const Key('camera_attention_metric'),
+                                label: 'Head Direction',
+                                value: setup.monitorCameraAttention
+                                    ? faceAttentionLabel(face)
+                                    : 'Off',
+                                icon: Icons.center_focus_strong,
+                                good: face == FaceAttentionState.facingCamera,
+                                enabled:
+                                    setup.monitorCameraAttention &&
+                                    face != FaceAttentionState.unavailable,
+                                progress: null,
+                                description:
+                                    'Estimated head orientation, not eye contact',
+                              ),
                             ),
                             _LiveMetric(
                               key: const Key('filler_metric'),
                               label: 'Fillers Detected',
                               value: setup.monitorFillers
-                                  ? '$_fillerTotal'
+                                  ? 'After session'
                                   : 'Off',
                               icon: Icons.chat_bubble_outline,
-                              good: _fillerTotal == 0,
+                              good: false,
                               enabled: setup.monitorFillers,
-                              progress: (1 - (_fillerTotal / 8)).clamp(0, 1),
-                              description: _fillerTotal == 0
-                                  ? 'No fillers detected'
-                                  : 'Try a quiet pause',
+                              progress: null,
+                              description:
+                                  'Final totals use your full transcript',
                             ),
                           ],
                         ),
@@ -2086,7 +2792,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
               Positioned.fill(
                 child: ColoredBox(
                   color: const Color(0x99071526),
-                  child: Center(
+                  child: ScrollableCenter(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -2123,7 +2829,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
               Positioned.fill(
                 child: ColoredBox(
                   color: const Color(0xD9071526),
-                  child: Center(
+                  child: ScrollableCenter(
                     child: Container(
                       key: const Key('transcribing_rehearsal'),
                       margin: const EdgeInsets.all(28),
@@ -2177,6 +2883,9 @@ class _CameraStage extends StatelessWidget {
     required this.cameraEnabled,
     required this.cameraStatus,
     required this.recording,
+    required this.showPoseLandmarks,
+    required this.poseOverlayFrames,
+    required this.feedback,
   });
 
   final CameraController? controller;
@@ -2184,6 +2893,9 @@ class _CameraStage extends StatelessWidget {
   final bool cameraEnabled;
   final String cameraStatus;
   final bool recording;
+  final ValueListenable<bool> showPoseLandmarks;
+  final ValueListenable<PoseOverlayFrame?> poseOverlayFrames;
+  final Widget feedback;
 
   @override
   Widget build(BuildContext context) {
@@ -2196,7 +2908,11 @@ class _CameraStage extends StatelessWidget {
         builder: (context, value, child) {
           if (!cameraEnabled) {
             return _buildFrame(
-              aspectRatio: 9 / 16,
+              context: context,
+              aspectRatio:
+                  MediaQuery.orientationOf(context) == Orientation.landscape
+                  ? 16 / 9
+                  : 9 / 16,
               preview: const _CameraOffView(),
               showRecordingBadge: false,
             );
@@ -2207,7 +2923,7 @@ class _CameraStage extends StatelessWidget {
               ? activeController.buildPreview()
               : CameraPreview(activeController);
           final portraitPreview = FittedBox(
-            fit: BoxFit.cover,
+            fit: BoxFit.contain,
             child: SizedBox(
               width: previewAspectRatio * 1000,
               height: 1000,
@@ -2215,7 +2931,11 @@ class _CameraStage extends StatelessWidget {
             ),
           );
           return _buildFrame(
-            aspectRatio: 9 / 16,
+            context: context,
+            aspectRatio:
+                MediaQuery.orientationOf(context) == Orientation.landscape
+                ? 16 / 9
+                : 9 / 16,
             preview: portraitPreview,
             showRecordingBadge: recording,
           );
@@ -2224,40 +2944,45 @@ class _CameraStage extends StatelessWidget {
     }
 
     return _buildFrame(
-      aspectRatio: 9 / 16,
+      context: context,
+      aspectRatio: MediaQuery.orientationOf(context) == Orientation.landscape
+          ? 16 / 9
+          : 9 / 16,
       showRecordingBadge: false,
       preview: ColoredBox(
         color: const Color(0xFF102A46),
         child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.videocam_outlined,
-                  color: Color(0xFF9EB1C7),
-                  size: 52,
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Camera preview will appear here',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  cameraStatus,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.videocam_outlined,
                     color: Color(0xFF9EB1C7),
-                    fontSize: 13,
+                    size: 52,
                   ),
-                ),
-              ],
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Camera preview will appear here',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    cameraStatus,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFF9EB1C7),
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -2288,13 +3013,14 @@ class _CameraStage extends StatelessWidget {
   }
 
   Widget _buildFrame({
+    required BuildContext context,
     required double aspectRatio,
     required Widget preview,
     bool showRecordingBadge = true,
   }) {
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 430),
+        constraints: BoxConstraints(maxWidth: _cameraFrameWidth(context)),
         child: AspectRatio(
           aspectRatio: aspectRatio,
           child: Semantics(
@@ -2313,10 +3039,17 @@ class _CameraStage extends StatelessWidget {
                     color: const Color(0xFF071526),
                     child: SizedBox.expand(child: preview),
                   ),
+                  ValueListenableBuilder<bool>(
+                    valueListenable: showPoseLandmarks,
+                    builder: (context, show, child) => show
+                        ? PoseLandmarkOverlay(frames: poseOverlayFrames)
+                        : const SizedBox.shrink(),
+                  ),
+                  Positioned.fill(child: feedback),
                   if (showRecordingBadge)
                     Positioned(
-                      left: 14,
-                      top: 14,
+                      right: 14,
+                      bottom: 14,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 10,
@@ -2535,38 +3268,10 @@ class _MediaControlButton extends StatelessWidget {
           style: IconButton.styleFrom(
             backgroundColor: enabled ? const Color(0xFF245B86) : errorRed,
             foregroundColor: Colors.white,
-            minimumSize: const Size(46, 46),
+            minimumSize: const Size(48, 48),
           ),
           icon: Icon(enabled ? enabledIcon : disabledIcon),
         ),
-      ),
-    );
-  }
-}
-
-class _AlertTestButton extends StatelessWidget {
-  const _AlertTestButton({
-    super.key,
-    required this.icon,
-    required this.label,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      onPressed: onPressed,
-      icon: Icon(icon, size: 16),
-      label: Text(label),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: const Color(0xFFD8E5F1),
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-        visualDensity: VisualDensity.compact,
-        side: const BorderSide(color: Color(0xFF45627E)),
       ),
     );
   }
@@ -2589,7 +3294,7 @@ class _LiveMetric extends StatelessWidget {
   final IconData icon;
   final bool good;
   final bool enabled;
-  final double progress;
+  final double? progress;
   final String description;
 
   @override
@@ -2616,8 +3321,6 @@ class _LiveMetric extends StatelessWidget {
               Expanded(
                 child: Text(
                   label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Color(0xFFC3D0DE),
                     fontSize: 11,
@@ -2642,11 +3345,9 @@ class _LiveMetric extends StatelessWidget {
               ),
             ],
           ),
-          const Spacer(),
+          const SizedBox(height: 14),
           Text(
             value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: color,
               fontSize: 18,
@@ -2655,21 +3356,21 @@ class _LiveMetric extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            enabled ? description : 'Monitoring disabled',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            description,
             style: const TextStyle(color: Color(0xFF91A5BA), fontSize: 9.5),
           ),
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: enabled ? progress : 0,
-              minHeight: 4,
-              color: color,
-              backgroundColor: const Color(0xFF294966),
+          if (progress != null) ...[
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: enabled ? progress : 0,
+                minHeight: 4,
+                color: color,
+                backgroundColor: const Color(0xFF294966),
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -2711,7 +3412,7 @@ class _AnalyzingScreenState extends State<AnalyzingScreen> {
       canPop: false,
       child: Scaffold(
         body: SafeArea(
-          child: Center(
+          child: ScrollableCenter(
             child: PageFrame(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -2760,7 +3461,7 @@ class _AnalyzingScreenState extends State<AnalyzingScreen> {
                     const SizedBox(height: 20),
                   ],
                   const Text(
-                    'SIMULATED ANALYSIS',
+                    'PREPARING RESULTS',
                     style: TextStyle(
                       color: accentTeal,
                       fontSize: 11,
@@ -2848,7 +3549,7 @@ class _ReportScreenState extends State<ReportScreen> {
     }
     final fillerAnalysis = report.fillerAnalysis;
     final fillers = fillerAnalysis.counts.entries
-        .where((entry) => entry.value > 0)
+        .where((entry) => report.monitorFillers && entry.value > 0)
         .toList();
     return Scaffold(
       appBar: AppBar(
@@ -2874,7 +3575,7 @@ class _ReportScreenState extends State<ReportScreen> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      ScoreRing(score: report.overallScore),
+                      ScoreRing(score: report.validatedOverallScore),
                       const SizedBox(height: 16),
                       Text(
                         report.title,
@@ -2900,9 +3601,11 @@ class _ReportScreenState extends State<ReportScreen> {
                           color: accentTeal.withValues(alpha: .09),
                           borderRadius: BorderRadius.circular(20),
                         ),
-                        child: const Text(
-                          'Simulated prototype results',
-                          style: TextStyle(
+                        child: Text(
+                          report.isDemoSession
+                              ? 'Demo example, not student results'
+                              : 'Measured feedback · Overall not scored',
+                          style: const TextStyle(
                             color: accentTeal,
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
@@ -2915,24 +3618,36 @@ class _ReportScreenState extends State<ReportScreen> {
                 const SizedBox(height: 30),
                 const SectionHeader('Delivery breakdown'),
                 const SizedBox(height: 12),
-                SpeakingPaceCard(pace: report.speakingPace),
+                SpeakingPaceCard(
+                  pace: report.speakingPace,
+                  enabled: report.monitorPace,
+                ),
                 const SizedBox(height: 10),
-                FillerFrequencyCard(analysis: fillerAnalysis),
+                FillerFrequencyCard(
+                  analysis: fillerAnalysis,
+                  enabled: report.monitorFillers,
+                ),
                 const SizedBox(height: 10),
                 _ScoreRow(
                   icon: Icons.accessibility_new_rounded,
-                  label: 'Posture',
-                  score: report.postureScore,
-                  status: report.postureScore >= 80
-                      ? 'Good'
-                      : 'Needs Correction',
+                  label: 'Acceptable posture time',
+                  score: report.measuredPosturePercentage,
+                  status: !report.monitorBodyLanguage
+                      ? 'Monitoring off for this rehearsal'
+                      : report.postureAnalysisUnavailable
+                      ? 'Unavailable — not enough visible pose data'
+                      : 'Fraction of visible pose time · prototype thresholds',
                 ),
                 const SizedBox(height: 10),
                 _ScoreRow(
                   icon: Icons.center_focus_strong_rounded,
-                  label: 'Camera Attention',
-                  score: report.attentionScore,
-                  status: '${report.attentionScore}%',
+                  label: 'Estimated camera-facing time',
+                  score: report.measuredAttentionPercentage,
+                  status: !report.monitorCameraAttention
+                      ? 'Monitoring off for this rehearsal'
+                      : report.measuredAttentionPercentage == null
+                      ? 'Unavailable — insufficient valid face analysis'
+                      : 'Percentage of valid face-analysis time, not eye contact',
                 ),
                 const SizedBox(height: 28),
                 const SectionHeader('Filler frequencies'),
@@ -2942,7 +3657,9 @@ class _ReportScreenState extends State<ReportScreen> {
                     padding: const EdgeInsets.all(16),
                     child: fillers.isEmpty
                         ? Text(
-                            fillerAnalysis.hasTranscript
+                            !report.monitorFillers
+                                ? 'Filler monitoring was off for this rehearsal.'
+                                : fillerAnalysis.hasTranscript
                                 ? 'No listed filler words were found in the transcript.'
                                 : 'Filler detection requires a transcript.',
                             style: const TextStyle(
@@ -3014,24 +3731,21 @@ class _ReportScreenState extends State<ReportScreen> {
                     ),
                   ),
                 ],
-                if (report.referenceScript?.trim().isNotEmpty == true) ...[
+                if (report.hasScriptComparison) ...[
                   const SizedBox(height: 28),
                   ScriptComparisonSummary(
                     documentName: report.referenceDocumentName,
-                    omittedPortions: report.omittedScriptPortions,
-                    addedPortions: report.addedTranscriptPortions,
-                    differentlyDeliveredPortions:
-                        report.differentlyDeliveredPortions,
+                    result: report.scriptComparison!,
                   ),
                 ],
                 const SizedBox(height: 28),
-                const SectionHeader('Recommended posture'),
+                const SectionHeader('Upper-body feedback'),
                 const SizedBox(height: 12),
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
                     child: Text(
-                      report.recommendedPosture,
+                      report.postureCoachingRecommendation,
                       style: const TextStyle(
                         color: Color(0xFF334155),
                         height: 1.5,
@@ -3043,7 +3757,7 @@ class _ReportScreenState extends State<ReportScreen> {
                 const SizedBox(height: 28),
                 const SectionHeader('Coaching tips'),
                 const SizedBox(height: 12),
-                ...report.coachingTips.map(
+                ...report.measuredCoachingTips.map(
                   (tip) => Padding(
                     padding: const EdgeInsets.only(bottom: 10),
                     child: InfoBanner(
@@ -3116,16 +3830,12 @@ class _ScoreRow extends StatelessWidget {
   });
   final IconData icon;
   final String label;
-  final int score;
+  final int? score;
   final String status;
 
   @override
   Widget build(BuildContext context) {
-    final color = score >= 80
-        ? successGreen
-        : score >= 70
-        ? warningOrange
-        : errorRed;
+    final color = score == null ? const Color(0xFF617085) : accentTeal;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(15),
@@ -3160,7 +3870,7 @@ class _ScoreRow extends StatelessWidget {
               ),
             ),
             Text(
-              '$score',
+              score == null ? '—' : '$score%',
               style: TextStyle(
                 color: color,
                 fontSize: 22,

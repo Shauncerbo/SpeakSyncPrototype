@@ -65,6 +65,22 @@ void main() {
     expect(result.offsets['kuan'], [14, 19]);
   });
 
+  test("Ku'an spellings group under the canonical kuan filler", () {
+    final result = analyze("Ku'an, kuan! Ku\u2019an; KU\u2018AN kwan.");
+    expect(result.counts, {'kuan': 5});
+    expect(result.total, 5);
+    expect(result.offsets['kuan'], [0, 7, 13, 20, 26]);
+    expect(result.perMinute, 5);
+    expect(result.classification, 'Low / Acceptable');
+  });
+
+  test("Ku'an matching does not count fragments or unrelated apostrophes", () {
+    final result = analyze("ku'anan aku'an ku'ang shouldn't 'ku'an'");
+    expect(result.counts, {'kuan': 1});
+    expect(result.total, 1);
+    expect(result.offsets['kuan'], [33]);
+  });
+
   test('Does not match fragments inside other words', () {
     final result = analyze('human umbrella piano kumusta kasama bitawan');
     expect(result.total, 0);

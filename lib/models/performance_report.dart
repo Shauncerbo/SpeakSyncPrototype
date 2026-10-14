@@ -4,6 +4,8 @@ part 'performance_report.g.dart';
 
 @HiveType(typeId: 5)
 class PerformanceReport {
+  // Field IDs stay stable. Null means unavailable/unvalidated, not zero.
+  // Old numeric values remain readable, but do not establish score validity.
   const PerformanceReport({
     required this.reportId,
     required this.sessionId,
@@ -27,6 +29,12 @@ class PerformanceReport {
     this.omittedScriptPortions = const [],
     this.addedTranscriptPortions = const [],
     this.differentlyDeliveredPortions = const [],
+    this.totalScriptWords,
+    this.matchedScriptWords,
+    this.scriptComparisonStatus,
+    this.validPostureSeconds,
+    this.validFaceAnalysisMilliseconds,
+    this.cameraFramingMilliseconds,
   });
 
   @HiveField(0)
@@ -39,28 +47,30 @@ class PerformanceReport {
   final int totalWords;
 
   @HiveField(3)
-  final double wordsPerMinute;
+  final double? wordsPerMinute;
 
   @HiveField(4)
-  final int paceScore;
+  final int? paceScore;
 
   @HiveField(5)
-  final int fillerScore;
+  final int? fillerScore;
 
   @HiveField(6)
-  final int goodPostureSeconds;
+  final int? goodPostureSeconds;
 
   @HiveField(7)
-  final int postureScore;
+  /// Pose-derived acceptable-time percentage when coverage is sufficient.
+  /// This is not a validated educational performance score.
+  final int? postureScore;
 
   @HiveField(8)
-  final int cameraFacingSeconds;
+  final int? cameraFacingSeconds;
 
   @HiveField(9)
-  final int cameraScore;
+  final int? cameraScore;
 
   @HiveField(10)
-  final int overallScore;
+  final int? overallScore;
 
   @HiveField(11)
   final List<String> coachingTips;
@@ -94,4 +104,28 @@ class PerformanceReport {
 
   @HiveField(21, defaultValue: <String>[])
   final List<String> differentlyDeliveredPortions;
+
+  @HiveField(22)
+  final int? totalScriptWords;
+
+  @HiveField(23)
+  final int? matchedScriptWords;
+
+  @HiveField(24)
+  final String? scriptComparisonStatus;
+
+  /// Total rehearsal time backed by sufficiently visible pose landmarks.
+  /// Null identifies reports saved before on-device posture analysis existed.
+  @HiveField(25)
+  final int? validPostureSeconds;
+
+  /// Null for legacy/unmeasured attention. Provenance and the valid-time
+  /// denominator for head-orientation estimates (not eye contact or a score).
+  @HiveField(26)
+  final int? validFaceAnalysisMilliseconds;
+
+  /// Valid intervals of the existing pose-derived framing classifications.
+  /// Null for legacy records; unavailable/gapped frames are never counted.
+  @HiveField(27)
+  final Map<String, int>? cameraFramingMilliseconds;
 }

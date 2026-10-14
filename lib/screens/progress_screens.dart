@@ -15,8 +15,14 @@ class ProgressScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = AppStateScope.of(context);
     final sessions = state.sessions;
-    final rankedSessions = [...sessions]
-      ..sort((a, b) => b.overallScore.compareTo(a.overallScore));
+    final rankedSessions =
+        sessions
+            .where((session) => session.validatedOverallScore != null)
+            .toList()
+          ..sort(
+            (a, b) =>
+                b.validatedOverallScore!.compareTo(a.validatedOverallScore!),
+          );
     final chronologicalSessions = [...sessions]
       ..sort((a, b) => b.dateTime.compareTo(a.dateTime));
     final latestSession = chronologicalSessions.isEmpty
@@ -49,34 +55,28 @@ class ProgressScreen extends StatelessWidget {
                     style: TextStyle(color: Color(0xFF617085), fontSize: 15),
                   ),
                   const SizedBox(height: 22),
-                  Row(
+                  ResponsiveCardGrid(
+                    columns: 3,
+                    spacing: 10,
                     children: [
-                      Expanded(
-                        child: MetricCard(
-                          icon: Icons.workspace_premium_outlined,
-                          label: 'Average score',
-                          value: sessions.isEmpty
-                              ? '—'
-                              : '${state.averageScore}',
-                          color: successGreen,
-                        ),
+                      MetricCard(
+                        icon: Icons.workspace_premium_outlined,
+                        label: 'Average score',
+                        value: state.averageScore == null
+                            ? 'Not scored'
+                            : '${state.averageScore}',
+                        color: successGreen,
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: MetricCard(
-                          icon: Icons.replay_rounded,
-                          label: 'Total sessions',
-                          value: '${sessions.length}',
-                        ),
+                      MetricCard(
+                        icon: Icons.replay_rounded,
+                        label: 'Total sessions',
+                        value: '${sessions.length}',
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: MetricCard(
-                          icon: Icons.schedule_rounded,
-                          label: 'Practice time',
-                          value: '${state.totalPracticeTime.inMinutes}m',
-                          color: accentTeal,
-                        ),
+                      MetricCard(
+                        icon: Icons.schedule_rounded,
+                        label: 'Practice time',
+                        value: '${state.totalPracticeTime.inMinutes}m',
+                        color: accentTeal,
                       ),
                     ],
                   ),
@@ -102,15 +102,16 @@ class ProgressScreen extends StatelessWidget {
                   const SectionHeader('Rehearsal Ranking'),
                   const SizedBox(height: 6),
                   const Text(
-                    'Tap a rehearsal to view its full score and feedback.',
+                    'Rankings require a validated scoring policy.',
                     style: TextStyle(color: Color(0xFF617085), fontSize: 13),
                   ),
                   const SizedBox(height: 12),
                   if (rankedSessions.isEmpty)
                     const InfoBanner(
                       icon: Icons.emoji_events_outlined,
-                      title: 'No rankings yet',
-                      message: 'Complete a rehearsal to enter the ranking.',
+                      title: 'Rankings unavailable',
+                      message:
+                          'Overall scoring is not implemented. View measured feedback in Session history.',
                     )
                   else
                     ...rankedSessions.indexed.map(
@@ -183,8 +184,10 @@ class _ImprovementInsightCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final latest = latestSession;
     final previous = previousSession;
-    final difference = latest != null && previous != null
-        ? latest.overallScore - previous.overallScore
+    final difference =
+        latest?.validatedOverallScore != null &&
+            previous?.validatedOverallScore != null
+        ? latest!.validatedOverallScore! - previous!.validatedOverallScore!
         : null;
     final isImprovement = difference != null && difference > 0;
     final color = difference == null || difference == 0
@@ -193,7 +196,8 @@ class _ImprovementInsightCard extends StatelessWidget {
         ? accentTeal
         : warningOrange;
     final message = switch (difference) {
-      null => 'Complete two rehearsals to see how your score changes.',
+      null =>
+        'Score improvement is unavailable until a validated scoring policy is implemented.',
       > 0 => 'You improved by +$difference points from your last rehearsal.',
       < 0 =>
         'Your score dropped by $difference points. Try reducing filler words next time.',
@@ -223,41 +227,16 @@ class _WeakestAreaCard extends StatelessWidget {
     final latest = session;
     if (latest == null) {
       return const _ProgressInsightCard(
-        title: 'Weakest Area Summary',
+        title: 'Practice focus',
         message: 'Complete a rehearsal to receive a coaching focus.',
         icon: Icons.track_changes_rounded,
         color: accentTeal,
       );
     }
 
-    final areas = <({String label, int score, String coaching})>[
-      (
-        label: 'Filler words',
-        score: latest.fillerScore,
-        coaching: 'Replace filler words with a brief, confident pause.',
-      ),
-      (
-        label: 'Posture',
-        score: latest.postureScore,
-        coaching: 'Keep your shoulders relaxed and your stance steady.',
-      ),
-      (
-        label: 'Speaking pace',
-        score: latest.paceScore,
-        coaching: 'Slow down slightly and pause between key ideas.',
-      ),
-      (
-        label: 'Camera-facing attention',
-        score: latest.attentionScore,
-        coaching: 'Try looking toward the camera more often.',
-      ),
-    ]..sort((a, b) => a.score.compareTo(b.score));
-    final weakest = areas.first;
-
     return _ProgressInsightCard(
-      title: 'Weakest Area Summary',
-      message:
-          'Main area to improve: ${weakest.label} (${weakest.score}). ${weakest.coaching}',
+      title: 'Practice focus',
+      message: latest.measuredCoachingTips.first,
       icon: Icons.track_changes_rounded,
       color: accentTeal,
     );
@@ -437,7 +416,7 @@ class _RankingCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    '${session.overallScore}',
+                    session.validatedOverallScore?.toString() ?? 'Not scored',
                     style: TextStyle(
                       color: highlight,
                       fontSize: 24,
@@ -477,14 +456,8 @@ class SessionDetailsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final fillerAnalysis = session.fillerAnalysis;
     final fillers = fillerAnalysis.counts.entries.where(
-      (entry) => entry.value > 0,
+      (entry) => session.monitorFillers && entry.value > 0,
     );
-    final strengths = <MapEntry<String, int>>[
-      MapEntry('Pace', session.paceScore),
-      MapEntry('Filler Control', session.fillerScore),
-      MapEntry('Posture', session.postureScore),
-      MapEntry('Camera Attention', session.attentionScore),
-    ]..sort((a, b) => b.value.compareTo(a.value));
     return Scaffold(
       appBar: AppBar(title: const Text('Session Details')),
       body: SafeArea(
@@ -496,7 +469,10 @@ class SessionDetailsScreen extends StatelessWidget {
                 Center(
                   child: Column(
                     children: [
-                      ScoreRing(score: session.overallScore, size: 140),
+                      ScoreRing(
+                        score: session.validatedOverallScore,
+                        size: 140,
+                      ),
                       const SizedBox(height: 18),
                       Text(
                         session.title,
@@ -514,7 +490,7 @@ class SessionDetailsScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 5),
                       Text(
-                        '${session.speechType} • ${session.languageMode}',
+                        '${session.speechType} • ${session.languageMode}${session.isDemoSession ? ' • Demo example, not student results' : ''}',
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: accentTeal,
@@ -526,36 +502,32 @@ class SessionDetailsScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 30),
-                const SectionHeader('Score breakdown'),
+                const SectionHeader('Measured feedback'),
                 const SizedBox(height: 12),
-                SpeakingPaceCard(pace: session.speakingPace),
-                FillerFrequencyCard(analysis: fillerAnalysis),
-                _DetailScore(label: 'Posture', value: session.postureScore),
+                SpeakingPaceCard(
+                  pace: session.speakingPace,
+                  enabled: session.monitorPace,
+                ),
+                FillerFrequencyCard(
+                  analysis: fillerAnalysis,
+                  enabled: session.monitorFillers,
+                ),
                 _DetailScore(
-                  label: 'Camera Attention',
-                  value: session.attentionScore,
+                  label: 'Acceptable posture time (prototype thresholds)',
+                  value: session.measuredPosturePercentage,
+                ),
+                _DetailScore(
+                  label: 'Estimated camera-facing time (not eye contact)',
+                  value: session.measuredAttentionPercentage,
                 ),
                 const SizedBox(height: 14),
-                const SectionHeader('What you did well'),
+                const SectionHeader('Scoring availability'),
                 const SizedBox(height: 12),
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
-                    child: Column(
-                      children: strengths
-                          .take(2)
-                          .map(
-                            (strength) => Padding(
-                              padding: EdgeInsets.only(
-                                bottom: strength == strengths.first ? 14 : 0,
-                              ),
-                              child: _StrengthRow(
-                                label: strength.key,
-                                score: strength.value,
-                              ),
-                            ),
-                          )
-                          .toList(),
+                    child: const Text(
+                      'Overall, pace, and filler scores are not validated. Available head-direction percentages use valid face-analysis time, not eye contact. WPM, fillers, posture, and head direction remain separate measurements.',
                     ),
                   ),
                 ),
@@ -567,7 +539,9 @@ class SessionDetailsScreen extends StatelessWidget {
                     padding: const EdgeInsets.all(16),
                     child: fillers.isEmpty
                         ? Text(
-                            fillerAnalysis.hasTranscript
+                            !session.monitorFillers
+                                ? 'Filler monitoring was off for this rehearsal.'
+                                : fillerAnalysis.hasTranscript
                                 ? 'No listed filler words were found in the transcript.'
                                 : 'Filler detection requires a transcript.',
                           )
@@ -618,24 +592,21 @@ class SessionDetailsScreen extends StatelessWidget {
                     ),
                   ),
                 ],
-                if (session.referenceScript?.trim().isNotEmpty == true) ...[
+                if (session.hasScriptComparison) ...[
                   const SizedBox(height: 26),
                   ScriptComparisonSummary(
                     documentName: session.referenceDocumentName,
-                    omittedPortions: session.omittedScriptPortions,
-                    addedPortions: session.addedTranscriptPortions,
-                    differentlyDeliveredPortions:
-                        session.differentlyDeliveredPortions,
+                    result: session.scriptComparison!,
                   ),
                 ],
                 const SizedBox(height: 26),
-                const SectionHeader('Recommended posture'),
+                const SectionHeader('Upper-body feedback'),
                 const SizedBox(height: 12),
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
                     child: Text(
-                      session.recommendedPosture,
+                      session.postureCoachingRecommendation,
                       style: const TextStyle(
                         color: Color(0xFF334155),
                         height: 1.5,
@@ -647,7 +618,7 @@ class SessionDetailsScreen extends StatelessWidget {
                 const SizedBox(height: 26),
                 const SectionHeader('Coaching tips'),
                 const SizedBox(height: 12),
-                ...session.coachingTips.map(
+                ...session.measuredCoachingTips.map(
                   (tip) => Padding(
                     padding: const EdgeInsets.only(bottom: 10),
                     child: InfoBanner(
@@ -687,74 +658,14 @@ class SessionDetailsScreen extends StatelessWidget {
   }
 }
 
-class _StrengthRow extends StatelessWidget {
-  const _StrengthRow({required this.label, required this.score});
-
-  final String label;
-  final int score;
-
-  String get message => switch (label) {
-    'Pace' => 'Your speaking rhythm was clear and easy to follow.',
-    'Filler Control' => 'You kept distracting filler words under control.',
-    'Posture' => 'You maintained confident and steady body language.',
-    _ => 'You stayed engaged with the camera and your audience.',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: successGreen.withValues(alpha: .12),
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(Icons.check_rounded, color: successGreen, size: 20),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '$label · $score/100',
-                style: const TextStyle(
-                  color: navy,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                message,
-                style: const TextStyle(
-                  color: Color(0xFF526277),
-                  fontSize: 13,
-                  height: 1.35,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _DetailScore extends StatelessWidget {
   const _DetailScore({required this.label, required this.value});
   final String label;
-  final int value;
+  final int? value;
 
   @override
   Widget build(BuildContext context) {
-    final color = value >= 80
-        ? successGreen
-        : value >= 70
-        ? warningOrange
-        : errorRed;
+    final color = value == null ? const Color(0xFF617085) : accentTeal;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(
@@ -768,7 +679,7 @@ class _DetailScore extends StatelessWidget {
                 ),
               ),
               Text(
-                '$value/100',
+                value == null ? 'Unavailable' : '$value%',
                 style: TextStyle(color: color, fontWeight: FontWeight.w800),
               ),
             ],
@@ -777,7 +688,7 @@ class _DetailScore extends StatelessWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: LinearProgressIndicator(
-              value: value / 100,
+              value: value == null ? 0 : value! / 100,
               minHeight: 8,
               color: color,
               backgroundColor: const Color(0xFFE4EAF2),

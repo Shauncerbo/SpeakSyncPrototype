@@ -52,6 +52,51 @@ void main() {
     expect(requestBody, contains(GroqTranscriptionService.model));
     expect(requestBody, contains('name="file"'));
     expect(requestBody, contains('filename="rehearsal.m4a"'));
+    expect(requestBody, isNot(contains('name="prompt"')));
+  });
+
+  test('sends the filler-aware prompt for the final transcription', () async {
+    late http.BaseRequest sentRequest;
+    final service = GroqTranscriptionService(
+      apiKey: 'test-key',
+      prompt: GroqTranscriptionService.fillerAwarePrompt,
+      client: MockClient((request) async {
+        sentRequest = request;
+        return http.Response(
+          '{"text":"Good morning. Um, kuan, ano, let us begin."}',
+          200,
+        );
+      }),
+    );
+
+    final transcript = await service.transcribe(audioFile.path);
+    final requestBody = utf8.decode((sentRequest as http.Request).bodyBytes);
+
+    expect(transcript, contains('Um, kuan, ano'));
+    expect(requestBody, contains('name="prompt"'));
+    expect(requestBody, contains('fillers retained'));
+    expect(requestBody, contains('kuan'));
+    expect(requestBody, contains("mura'g"));
+  });
+
+  test('uses the WAV filename for single-capture full recordings', () async {
+    final wav = File(
+      '${temporaryDirectory.path}${Platform.pathSeparator}full.wav',
+    );
+    await wav.writeAsBytes(const [1, 2, 3, 4]);
+    late http.BaseRequest sentRequest;
+    final service = GroqTranscriptionService(
+      apiKey: 'test-key',
+      client: MockClient((request) async {
+        sentRequest = request;
+        return http.Response('{"text":"Ano."}', 200);
+      }),
+    );
+    expect(await service.transcribe(wav.path), 'Ano.');
+    expect(
+      utf8.decode((sentRequest as http.Request).bodyBytes),
+      contains('filename="rehearsal.wav"'),
+    );
   });
 
   test('reports a missing local API key without sending audio', () async {
