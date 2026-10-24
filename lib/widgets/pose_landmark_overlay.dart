@@ -151,6 +151,8 @@ class PoseLandmarkPainter extends CustomPainter {
 }
 
 class PoseOverlayDebugToggle extends StatelessWidget {
+  /// Developer diagnostic component. The student rehearsal UI intentionally
+  /// does not mount this control or [PoseLandmarkOverlay].
   const PoseOverlayDebugToggle({
     super.key,
     required this.value,

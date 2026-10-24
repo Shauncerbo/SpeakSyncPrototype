@@ -348,11 +348,11 @@ class ScriptComparisonSummary extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SectionHeader('Prepared Speech Comparison'),
+        const SectionHeader('Reference Script Comparison'),
         const SizedBox(height: 6),
         Text(
           documentName == null
-              ? 'Compared with the uploaded reference script.'
+              ? 'Compared with your typed reference script.'
               : 'Compared with $documentName.',
           style: const TextStyle(color: Color(0xFF617085), fontSize: 13),
         ),

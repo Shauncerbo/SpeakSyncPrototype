@@ -8,6 +8,7 @@ import 'package:speaksync_prototype/services/rehearsal_audio_recorder.dart';
 
 class _FakeRecorder implements AudioRecorder {
   final paths = <String>[];
+  final fileConfigs = <RecordConfig>[];
   Completer<String?>? stopping;
   bool paused = false;
 
@@ -16,6 +17,7 @@ class _FakeRecorder implements AudioRecorder {
 
   @override
   Future<void> start(RecordConfig config, {required String path}) async {
+    fileConfigs.add(config);
     paths.add(path);
     paused = false;
     await File(path).writeAsString('sample audio');
@@ -36,11 +38,19 @@ class _FakeRecorder implements AudioRecorder {
 
 class _StreamRecorder extends _FakeRecorder {
   final stream = StreamController<Uint8List>();
+  final streamConfigs = <RecordConfig>[];
 
   @override
   Future<Stream<Uint8List>> startStream(RecordConfig config) async {
+    streamConfigs.add(config);
     expect(config.encoder, AudioEncoder.pcm16bits);
     expect(config.sampleRate, 16000);
+    expect(config.numChannels, 1);
+    expect(config.autoGain, isFalse);
+    expect(config.echoCancel, isFalse);
+    expect(config.noiseSuppress, isFalse);
+    expect(config.audioInterruption, AudioInterruptionMode.pauseResume);
+    expect(config.androidConfig.audioSource, AndroidAudioSource.defaultSource);
     return stream.stream;
   }
 
@@ -109,7 +119,7 @@ void main() {
   });
 
   test(
-    'one capture produces non-overlapping chunks and a complete WAV',
+    'live chunks overlap while the complete WAV keeps each sample once',
     () async {
       final directory = await Directory.systemTemp.createTemp(
         'live-recorder-test',
@@ -121,25 +131,41 @@ void main() {
         temporaryDirectory: () async => directory,
       );
       expect(recorder.chunkDuration, const Duration(seconds: 10));
+      expect(recorder.liveChunkOverlap, const Duration(milliseconds: 750));
       final chunks = <Uint8List>[];
       final subscription = recorder.chunks.listen(chunks.add);
       await recorder.start(enableLiveChunks: true);
       final first = Uint8List(320000)..fillRange(0, 320000, 7);
+      final second = Uint8List(320000)..fillRange(0, 320000, 8);
       final tail = Uint8List(32000)..fillRange(0, 32000, 9);
       native.stream.add(first);
+      native.stream.add(second);
       native.stream.add(tail);
       await Future<void>.delayed(Duration.zero);
-      expect(chunks, hasLength(1));
-      expect(chunks.single, orderedEquals(first));
+      expect(chunks, hasLength(2));
+      expect(chunks.first, orderedEquals(first));
+      expect(chunks.last.length, 344000);
+      expect(
+        chunks.last.sublist(0, 24000),
+        orderedEquals(first.sublist(first.length - 24000)),
+      );
+      expect(chunks.last.sublist(24000), orderedEquals(second));
       final wavPath = await recorder.stop();
       expect(wavPath, endsWith('.wav'));
       final bytes = await File(wavPath!).readAsBytes();
       expect(String.fromCharCodes(bytes.sublist(0, 4)), 'RIFF');
       expect(String.fromCharCodes(bytes.sublist(8, 12)), 'WAVE');
-      expect(ByteData.sublistView(bytes).getUint32(40, Endian.little), 352000);
-      expect(bytes.length, 352044);
+      expect(ByteData.sublistView(bytes).getUint32(40, Endian.little), 672000);
+      expect(bytes.length, 672044);
       expect(bytes.sublist(44, 44 + first.length), orderedEquals(first));
-      expect(bytes.sublist(44 + first.length), orderedEquals(tail));
+      expect(
+        bytes.sublist(44 + first.length, 44 + first.length + second.length),
+        orderedEquals(second),
+      );
+      expect(
+        bytes.sublist(44 + first.length + second.length),
+        orderedEquals(tail),
+      );
       expect(
         directory.listSync().where((e) => e.path.endsWith('.pcm')),
         isEmpty,
@@ -161,6 +187,15 @@ void main() {
     await recorder.start(enableLiveChunks: true);
     expect(recorder.hasStarted, isTrue);
     expect(native.paths.single, endsWith('.m4a'));
+    final config = native.fileConfigs.single;
+    expect(config.encoder, AudioEncoder.aacLc);
+    expect(config.bitRate, 128000);
+    expect(config.sampleRate, 16000);
+    expect(config.numChannels, 1);
+    expect(config.autoGain, isFalse);
+    expect(config.echoCancel, isFalse);
+    expect(config.noiseSuppress, isFalse);
+    expect(config.audioInterruption, AudioInterruptionMode.pauseResume);
     expect(await recorder.stop(), native.paths.single);
     await recorder.deleteTemporaryFile(native.paths.single);
     await recorder.dispose();
@@ -194,4 +229,82 @@ void main() {
       await recorder.dispose();
     },
   );
+
+  test(
+    'split PCM sample bytes are reassembled without changing samples',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('split-pcm-');
+      addTearDown(() => directory.delete(recursive: true));
+      final native = _StreamRecorder();
+      final recorder = RehearsalAudioRecorder(
+        recorder: native,
+        temporaryDirectory: () async => directory,
+      );
+      await recorder.start(enableLiveChunks: true);
+      native.stream
+        ..add(Uint8List.fromList([0x34]))
+        ..add(Uint8List.fromList([0x12, 0x78]))
+        ..add(Uint8List.fromList([0x56]));
+      await Future<void>.delayed(Duration.zero);
+
+      final path = await recorder.stop();
+      final wav = await File(path!).readAsBytes();
+      expect(wav.sublist(44), [0x34, 0x12, 0x78, 0x56]);
+      expect(recorder.lastCaptureQuality?.sampleCount, 2);
+      expect(recorder.lastCaptureQuality?.fullScaleSampleCount, 0);
+      await recorder.deleteTemporaryFile(path);
+      await recorder.dispose();
+    },
+  );
+
+  test(
+    'incomplete PCM sample fails safely and removes temporary files',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('partial-pcm-');
+      addTearDown(() => directory.delete(recursive: true));
+      final native = _StreamRecorder();
+      final recorder = RehearsalAudioRecorder(
+        recorder: native,
+        temporaryDirectory: () async => directory,
+      );
+      await recorder.start(enableLiveChunks: true);
+      native.stream.add(Uint8List.fromList([0x34, 0x12, 0x78]));
+      await Future<void>.delayed(Duration.zero);
+
+      await expectLater(
+        recorder.stop(),
+        throwsA(isA<AudioRecordingException>()),
+      );
+      expect(
+        directory.listSync().where(
+          (entry) => entry.path.endsWith('.pcm') || entry.path.endsWith('.wav'),
+        ),
+        isEmpty,
+      );
+      await recorder.dispose();
+    },
+  );
+
+  test('PCM stream interruption fails safely and cleans up', () async {
+    final directory = await Directory.systemTemp.createTemp('pcm-error-');
+    addTearDown(() => directory.delete(recursive: true));
+    final native = _StreamRecorder();
+    final recorder = RehearsalAudioRecorder(
+      recorder: native,
+      temporaryDirectory: () async => directory,
+    );
+    await recorder.start(enableLiveChunks: true);
+    native.stream.add(Uint8List.fromList([0, 0, 1, 0]));
+    native.stream.addError(StateError('microphone disconnected'));
+    await Future<void>.delayed(Duration.zero);
+
+    await expectLater(recorder.stop(), throwsA(isA<AudioRecordingException>()));
+    expect(
+      directory.listSync().where(
+        (entry) => entry.path.endsWith('.pcm') || entry.path.endsWith('.wav'),
+      ),
+      isEmpty,
+    );
+    await recorder.dispose();
+  });
 }

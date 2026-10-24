@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:speaksync_prototype/services/filler_analysis.dart';
 import 'package:speaksync_prototype/services/groq_transcription_service.dart';
 import 'package:speaksync_prototype/services/live_filler_feedback_service.dart';
@@ -11,6 +14,7 @@ import 'package:speaksync_prototype/services/speaking_pace.dart';
 class _Transcriber extends GroqTranscriptionService {
   _Transcriber() : super(apiKey: 'test-placeholder');
   final responses = <Future<String> Function()>[];
+  final wordResponses = <List<GroqTranscribedWord>>[];
   final paths = <String>[];
   int active = 0;
   int maximumActive = 0;
@@ -29,6 +33,14 @@ class _Transcriber extends GroqTranscriptionService {
       active--;
     }
   }
+
+  @override
+  Future<GroqTranscriptionResult> transcribeWithWordTimestamps(
+    String audioPath,
+  ) async => GroqTranscriptionResult(
+    text: await transcribe(audioPath),
+    words: wordResponses.isEmpty ? const [] : wordResponses.removeAt(0),
+  );
 }
 
 void main() {
@@ -59,7 +71,51 @@ void main() {
   });
 
   Uint8List audio([int value = 1]) => Uint8List.fromList([value, 0, value, 0]);
+  Uint8List overlappedAudio() => Uint8List((10 * 32000) + (750 * 32));
   String words(int count) => List.filled(count, 'word').join(' ');
+
+  test(
+    'one Turbo HTTP transcript feeds mixed-language filler and pace',
+    () async {
+      var requests = 0;
+      const mixed =
+          'Good morning. Kuan, mahalaga ang practice para sa atong kaugmaon.';
+      final httpTranscriber = GroqTranscriptionService.liveFeedback(
+        apiKey: 'test-placeholder',
+        client: MockClient((request) async {
+          requests++;
+          expect(request.url.path, '/openai/v1/audio/transcriptions');
+          expect(
+            utf8.decode(request.bodyBytes, allowMalformed: true),
+            contains('whisper-large-v3-turbo'),
+          );
+          return http.Response('{"text":"$mixed"}', 200);
+        }),
+      );
+      final feedback = LiveFillerFeedbackService(
+        transcriber: httpTranscriber,
+        onFiller: alerts.add,
+        onPace: paceUpdates.add,
+        temporaryDirectory: () async => directory,
+      );
+      try {
+        feedback.accept(audio());
+        await _until(() => alerts.isNotEmpty && paceUpdates.isNotEmpty);
+        expect(requests, 1);
+        expect(alerts, ['kuan']);
+        expect(
+          paceUpdates.single.wordsPerMinute,
+          SpeakingPace.fromTranscript(
+            mixed,
+            const Duration(seconds: 10),
+          ).wordsPerMinute,
+        );
+      } finally {
+        await feedback.stop();
+        httpTranscriber.dispose();
+      }
+    },
+  );
 
   for (final entry in <(int, String)>[
     (19, 'Slow'),
@@ -237,6 +293,111 @@ void main() {
       expect(alerts, ['ano', 'kuan']);
     },
   );
+
+  test(
+    'timestamped overlap is excluded from filler alerts and live WPM',
+    () async {
+      transcriber.responses.addAll([
+        () async => 'Ano ${words(19)}',
+        () async => 'ano ${words(20)}',
+      ]);
+      transcriber.wordResponses.addAll([
+        [
+          const GroqTranscribedWord(
+            word: 'Ano',
+            startSeconds: 0,
+            endSeconds: 0.2,
+          ),
+          for (var index = 0; index < 19; index++)
+            GroqTranscribedWord(
+              word: 'word',
+              startSeconds: 0.3 + (index * 0.4),
+              endSeconds: 0.5 + (index * 0.4),
+            ),
+        ],
+        [
+          const GroqTranscribedWord(
+            word: 'ano',
+            startSeconds: 0.1,
+            endSeconds: 0.3,
+          ),
+          for (var index = 0; index < 20; index++)
+            GroqTranscribedWord(
+              word: 'word',
+              startSeconds: 0.9 + (index * 0.4),
+              endSeconds: 1.1 + (index * 0.4),
+            ),
+        ],
+      ]);
+
+      service.accept(audio());
+      await _until(() => paceUpdates.length == 1);
+      service.accept(overlappedAudio());
+      await _until(() => paceUpdates.length == 2);
+
+      expect(alerts, ['ano']);
+      expect(paceUpdates.last.wordsPerMinute, 120);
+    },
+  );
+
+  test(
+    'a natural repeated filler after overlap remains a new detection',
+    () async {
+      transcriber.responses.addAll([
+        () async => 'Ano ${words(4)}',
+        () async => 'ano ano ${words(4)}',
+      ]);
+      transcriber.wordResponses.addAll([
+        [
+          const GroqTranscribedWord(
+            word: 'Ano',
+            startSeconds: 9.4,
+            endSeconds: 9.7,
+          ),
+          for (var index = 0; index < 4; index++)
+            GroqTranscribedWord(
+              word: 'word',
+              startSeconds: index.toDouble(),
+              endSeconds: index + 0.2,
+            ),
+        ],
+        [
+          const GroqTranscribedWord(
+            word: 'ano',
+            startSeconds: 0.1,
+            endSeconds: 0.3,
+          ),
+          const GroqTranscribedWord(
+            word: 'ano',
+            startSeconds: 0.9,
+            endSeconds: 1.1,
+          ),
+          for (var index = 0; index < 4; index++)
+            GroqTranscribedWord(
+              word: 'word',
+              startSeconds: 1.3 + index,
+              endSeconds: 1.5 + index,
+            ),
+        ],
+      ]);
+
+      service.accept(audio());
+      await _until(() => alerts.length == 1);
+      service.accept(overlappedAudio());
+      await _until(() => alerts.length == 2);
+
+      expect(alerts, ['ano', 'ano']);
+    },
+  );
+
+  test('a word mostly after the overlap boundary is retained', () {
+    final transcript = LiveFillerFeedbackService.transcriptAfterOverlap(const [
+      GroqTranscribedWord(word: 'old', startSeconds: 0.1, endSeconds: 0.3),
+      GroqTranscribedWord(word: 'kuan', startSeconds: 0.65, endSeconds: 0.95),
+    ], const Duration(milliseconds: 750));
+
+    expect(transcript, 'kuan');
+  });
 
   test('a new service clears duplicate and rolling pace state', () async {
     final repeated = 'Ano ${words(11)}';

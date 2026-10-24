@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "notice": "Synthetic text fixtures for metric and harness checks only; not recognition accuracy data.",
+  "recordings": [
+    {
+      "recordingId": "synthetic_english",
+      "referenceVerified": false,
+      "languageGroup": "english",
+      "referenceTranscriptPath": "fixtures/english_reference.txt",
+      "rehearsalDurationSeconds": 30.0,
+      "audioDurationSeconds": 30.0,
+      "environment": "synthetic_not_recorded",
+      "speakingVolume": "synthetic_not_recorded",
+      "microphone": "synthetic_not_recorded",
+      "boundaryCase": "not_applicable",
+      "interruptionNotes": "not_applicable",
+      "hypotheses": {
+        "turbo_context_off": { "transcriptPath": "fixtures/english_hypothesis.txt" },
+        "turbo_context_on": { "transcriptPath": "fixtures/english_hypothesis.txt" },
+        "large_v3_context_off": { "transcriptPath": "fixtures/english_hypothesis.txt" },
+        "large_v3_context_on": { "transcriptPath": "fixtures/english_hypothesis.txt" }
+      }
+    },
+    {
+      "recordingId": "synthetic_filipino",
+      "referenceVerified": false,
+      "languageGroup": "filipino",
+      "referenceTranscriptPath": "fixtures/filipino_reference.txt",
+      "rehearsalDurationSeconds": 30.0,
+      "environment": "synthetic_not_recorded",
+      "hypotheses": {
+        "turbo_context_off": { "transcriptPath": "fixtures/filipino_hypothesis.txt" },
+        "turbo_context_on": { "transcriptPath": "fixtures/filipino_hypothesis.txt" },
+        "large_v3_context_off": { "transcriptPath": "fixtures/filipino_hypothesis.txt" },
+        "large_v3_context_on": { "transcriptPath": "fixtures/filipino_hypothesis.txt" }
+      }
+    },
+    {
+      "recordingId": "synthetic_cebuano",
+      "referenceVerified": false,
+      "languageGroup": "cebuano_bisaya",
+      "referenceTranscriptPath": "fixtures/cebuano_reference.txt",
+      "rehearsalDurationSeconds": 30.0,
+      "environment": "synthetic_not_recorded",
+      "hypotheses": {
+        "turbo_context_off": { "transcriptPath": "fixtures/cebuano_hypothesis.txt" },
+        "turbo_context_on": { "transcriptPath": "fixtures/cebuano_hypothesis.txt" },
+        "large_v3_context_off": { "transcriptPath": "fixtures/cebuano_hypothesis.txt" },
+        "large_v3_context_on": { "transcriptPath": "fixtures/cebuano_hypothesis.txt" }
+      }
+    },
+    {
+      "recordingId": "synthetic_code_switched",
+      "referenceVerified": false,
+      "languageGroup": "code_switched",
+      "referenceTranscriptPath": "fixtures/code_switched_reference.txt",
+      "rehearsalDurationSeconds": 20.0,
+      "environment": "synthetic_not_recorded",
+      "hypotheses": {
+        "turbo_context_off": { "transcriptPath": "fixtures/code_switched_hypothesis.txt" },
+        "turbo_context_on": { "transcriptPath": "fixtures/code_switched_hypothesis.txt" },
+        "large_v3_context_off": { "transcriptPath": "fixtures/code_switched_hypothesis.txt" },
+        "large_v3_context_on": { "transcriptPath": "fixtures/code_switched_hypothesis.txt" }
+      }
+    }
+  ]
+}

@@ -5,6 +5,7 @@ import 'package:hive/hive.dart';
 import 'package:speaksync_prototype/data/dummy_data.dart';
 import 'package:speaksync_prototype/models/performance_report.dart';
 import 'package:speaksync_prototype/models/practice_session.dart';
+import 'package:speaksync_prototype/models/practice_settings.dart';
 import 'package:speaksync_prototype/screens/progress_screens.dart';
 import 'package:speaksync_prototype/services/script_comparison_service.dart';
 import 'package:speaksync_prototype/storage/hive_repository.dart';
@@ -13,6 +14,7 @@ import 'package:speaksync_prototype/widgets/common_widgets.dart';
 PracticeSession _session({
   String type = 'Prepared',
   String? transcript = 'We value communication today',
+  String? documentName = 'speech.pdf',
   bool legacy = false,
 }) {
   const script = 'We value effective clear communication today';
@@ -37,7 +39,7 @@ PracticeSession _session({
     isPrototypeData: true,
     textTranscript: transcript,
     referenceScript: script,
-    referenceDocumentName: 'speech.pdf',
+    referenceDocumentName: documentName,
     totalScriptWords: legacy ? null : r.totalReferenceWords,
     matchedScriptWords: legacy ? null : r.matchedReferenceWords,
     scriptComparisonStatus: legacy ? null : r.status,
@@ -116,13 +118,32 @@ void main() {
         sessions: [],
         preferences: initialPreferences,
       );
-      final session = _session(type: 'Persuasive');
+      final session = _session(type: 'Persuasive', documentName: null);
+      const settings = PracticeSettings(
+        speechTitle: 'Communication',
+        speechContent: 'We value effective clear communication today',
+        referenceDocumentName: 'speech.pdf',
+        speechType: 'Persuasive',
+        languageMode: 'Mixed Language',
+        selectedDuration: '1 minute',
+        monitorBodyLanguage: true,
+        monitorCameraAttention: true,
+        monitorFillers: true,
+        monitorPace: true,
+        enableLiveFeedback: true,
+      );
       expect(
-        await repository.saveCompletedRehearsal(practiceSession: session),
+        await repository.saveCompletedRehearsal(
+          practiceSession: session,
+          settings: settings,
+        ),
         true,
       );
       expect(
-        await repository.saveCompletedRehearsal(practiceSession: session),
+        await repository.saveCompletedRehearsal(
+          practiceSession: session,
+          settings: settings,
+        ),
         false,
       );
       final report = repository.getPerformanceReportBySessionId(session.id)!;
@@ -156,9 +177,26 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('effective clear'), findsOneWidget);
+      expect(find.text('Reference Script Comparison'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
+  testWidgets('typed script report does not claim a document was uploaded', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SessionDetailsScreen(session: _session(documentName: null)),
+      ),
+    );
+    await tester.ensureVisible(find.byType(ScriptComparisonSummary));
+    await tester.pump();
+    expect(
+      find.text('Compared with your typed reference script.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('uploaded reference script'), findsNothing);
+  });
   testWidgets(
     'missing transcript explains unavailable comparison, not full match',
     (tester) async {

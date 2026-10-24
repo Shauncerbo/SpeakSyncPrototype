@@ -581,7 +581,9 @@ class HiveRepository {
           : 'Upper-body monitoring was off for this rehearsal.',
       isPrototypeData: true,
       referenceScript: hasReferenceScript ? referenceScript : null,
-      referenceDocumentName: practiceSession.referenceDocumentName,
+      referenceDocumentName:
+          practiceSession.referenceDocumentName ??
+          settings?.referenceDocumentName,
       omittedScriptPortions: List<String>.from(
         practiceSession.omittedScriptPortions,
       ),

@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
+import 'speech_audio_config.dart';
 import 'wav_audio.dart';
 
 class AudioRecordingException implements Exception {
@@ -18,29 +19,42 @@ class AudioRecordingException implements Exception {
 
 class RehearsalAudioRecorder {
   static const defaultLiveChunkDuration = Duration(seconds: 10);
+  static const defaultLiveChunkOverlap = Duration(milliseconds: 750);
 
   RehearsalAudioRecorder({
     AudioRecorder? recorder,
     Future<Directory> Function()? temporaryDirectory,
     this.chunkDuration = defaultLiveChunkDuration,
-  }) : _recorder = recorder ?? AudioRecorder(),
+    this.liveChunkOverlap = defaultLiveChunkOverlap,
+  }) : assert(chunkDuration > Duration.zero),
+       assert(liveChunkOverlap >= Duration.zero),
+       assert(liveChunkOverlap < chunkDuration),
+       _recorder = recorder ?? AudioRecorder(),
        _temporaryDirectory = temporaryDirectory ?? getTemporaryDirectory;
 
   final AudioRecorder _recorder;
   final Future<Directory> Function() _temporaryDirectory;
   final Duration chunkDuration;
+  final Duration liveChunkOverlap;
   final _chunks = StreamController<Uint8List>.broadcast();
   Stream<Uint8List> get chunks => _chunks.stream;
   StreamSubscription<Uint8List>? _pcmSubscription;
   Completer<void>? _pcmFinished;
   IOSink? _pcmSink;
   BytesBuilder _chunkBuffer = BytesBuilder(copy: true);
+  Uint8List _previousChunkTail = Uint8List(0);
   String? _pcmPath;
   int _pcmBytes = 0;
   bool _streamMode = false;
   Object? _pcmError;
+  int? _pendingPcmByte;
+  Pcm16SignalAnalyzer _signalAnalyzer = Pcm16SignalAnalyzer();
   String? _recordingPath;
   bool _started = false;
+
+  Pcm16SignalSummary? _lastCaptureQuality;
+
+  Pcm16SignalSummary? get lastCaptureQuality => _lastCaptureQuality;
 
   bool get hasStarted => _started;
 
@@ -71,19 +85,17 @@ class RehearsalAudioRecorder {
       if (enableLiveChunks) {
         try {
           final pcmPath = path.replaceFirst(RegExp(r'\.m4a$'), '.pcm');
-          final stream = await _recorder.startStream(
-            const RecordConfig(
-              encoder: AudioEncoder.pcm16bits,
-              sampleRate: WavAudio.sampleRate,
-              numChannels: 1,
-            ),
-          );
+          final stream = await _recorder.startStream(SpeechAudioConfig.pcm16);
           _pcmPath = pcmPath;
           _pcmSink = File(pcmPath).openWrite();
           _pcmFinished = Completer<void>();
           _pcmBytes = 0;
           _pcmError = null;
+          _pendingPcmByte = null;
+          _signalAnalyzer = Pcm16SignalAnalyzer();
+          _lastCaptureQuality = null;
           _chunkBuffer = BytesBuilder(copy: true);
+          _previousChunkTail = Uint8List(0);
           _streamMode = true;
           _pcmSubscription = stream.listen(
             _onPcmData,
@@ -111,14 +123,8 @@ class RehearsalAudioRecorder {
           _streamMode = false;
         }
       }
-      await _recorder.start(
-        const RecordConfig(
-          encoder: AudioEncoder.aacLc,
-          sampleRate: 16000,
-          numChannels: 1,
-        ),
-        path: path,
-      );
+      _lastCaptureQuality = null;
+      await _recorder.start(SpeechAudioConfig.aac, path: path);
       _recordingPath = path;
       _started = true;
     } catch (_) {
@@ -129,8 +135,11 @@ class RehearsalAudioRecorder {
   }
 
   void _onPcmData(Uint8List bytes) {
+    if (_pcmError != null || bytes.isEmpty) return;
+    final alignedBytes = _completePcmSamples(bytes);
+    if (alignedBytes.isEmpty) return;
     try {
-      _pcmSink?.add(bytes);
+      _pcmSink?.add(alignedBytes);
     } catch (error) {
       _pcmError = error;
       if (_pcmFinished != null && !_pcmFinished!.isCompleted) {
@@ -138,7 +147,8 @@ class RehearsalAudioRecorder {
       }
       return;
     }
-    _pcmBytes += bytes.length;
+    _pcmBytes += alignedBytes.length;
+    _signalAnalyzer.addBytes(alignedBytes);
     final chunkSize =
         chunkDuration.inMicroseconds *
         WavAudio.bytesPerSecond ~/
@@ -147,18 +157,61 @@ class RehearsalAudioRecorder {
     // in the first live chunk while always writing the full recording.
     if (chunkSize <= 0) return;
     var offset = 0;
-    while (offset < bytes.length) {
+    while (offset < alignedBytes.length) {
       final take = (chunkSize - _chunkBuffer.length).clamp(
         0,
-        bytes.length - offset,
+        alignedBytes.length - offset,
       );
       if (take == 0) break;
-      _chunkBuffer.add(Uint8List.sublistView(bytes, offset, offset + take));
+      _chunkBuffer.add(
+        Uint8List.sublistView(alignedBytes, offset, offset + take),
+      );
       offset += take;
       if (_chunkBuffer.length == chunkSize) {
-        _chunks.add(_chunkBuffer.takeBytes());
+        final freshChunk = _chunkBuffer.takeBytes();
+        final liveChunk =
+            Uint8List(_previousChunkTail.length + freshChunk.length)
+              ..setRange(0, _previousChunkTail.length, _previousChunkTail)
+              ..setRange(
+                _previousChunkTail.length,
+                _previousChunkTail.length + freshChunk.length,
+                freshChunk,
+              );
+        _chunks.add(liveChunk);
+
+        // Carry a small amount of already-recorded PCM into the next live WAV
+        // so Whisper can hear words that straddle a ten-second boundary. The
+        // full-recording sink above still receives every sample exactly once.
+        final overlapBytes =
+            liveChunkOverlap.inMicroseconds *
+            WavAudio.bytesPerSecond ~/
+            Duration.microsecondsPerSecond;
+        final retainedBytes = overlapBytes.clamp(0, freshChunk.length);
+        _previousChunkTail = retainedBytes == 0
+            ? Uint8List(0)
+            : Uint8List.fromList(
+                freshChunk.sublist(freshChunk.length - retainedBytes),
+              );
       }
     }
+  }
+
+  Uint8List _completePcmSamples(Uint8List bytes) {
+    final pending = _pendingPcmByte;
+    if (pending == null && bytes.length.isEven) return bytes;
+
+    final combined = Uint8List(bytes.length + (pending == null ? 0 : 1));
+    var offset = 0;
+    if (pending != null) {
+      combined[0] = pending;
+      offset = 1;
+    }
+    combined.setRange(offset, combined.length, bytes);
+    _pendingPcmByte = combined.length.isOdd ? combined.last : null;
+    final completeLength = combined.length - (combined.length.isOdd ? 1 : 0);
+    return completeLength == 0
+        ? Uint8List(0)
+        : Uint8List.sublistView(combined, 0, completeLength);
   }
 
   Future<void> pause() async {
@@ -183,7 +236,9 @@ class RehearsalAudioRecorder {
         await _pcmSubscription?.cancel();
         await _pcmSink?.close();
         _pcmSink = null;
-        if (_pcmError != null || _pcmBytes == 0) {
+        _previousChunkTail = Uint8List(0);
+        _lastCaptureQuality = _signalAnalyzer.summary;
+        if (_pcmError != null || _pendingPcmByte != null || _pcmBytes == 0) {
           throw const AudioRecordingException(
             'No rehearsal audio was recorded.',
           );
@@ -209,6 +264,8 @@ class RehearsalAudioRecorder {
       await _pcmSubscription?.cancel();
       await _pcmSink?.close();
       _pcmSink = null;
+      _previousChunkTail = Uint8List(0);
+      _pendingPcmByte = null;
       await deleteTemporaryFile(_pcmPath);
       _pcmPath = null;
       _streamMode = false;
@@ -227,6 +284,8 @@ class RehearsalAudioRecorder {
       await _pcmSubscription?.cancel();
       await _pcmSink?.close();
       _pcmSink = null;
+      _previousChunkTail = Uint8List(0);
+      _pendingPcmByte = null;
       await deleteTemporaryFile(_pcmPath);
       _pcmPath = null;
       _streamMode = false;
@@ -255,6 +314,8 @@ class RehearsalAudioRecorder {
   Future<void> dispose() async {
     await _pcmSubscription?.cancel();
     await _pcmSink?.close();
+    _previousChunkTail = Uint8List(0);
+    _pendingPcmByte = null;
     await deleteTemporaryFile(_pcmPath);
     await _chunks.close();
     await _recorder.dispose();

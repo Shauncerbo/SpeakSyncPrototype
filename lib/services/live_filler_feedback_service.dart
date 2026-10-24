@@ -22,7 +22,9 @@ class LivePaceUpdate {
   final int validChunks;
 }
 
-/// Processes one non-overlapping chunk at a time; keeps at most one newer chunk.
+/// Processes one live chunk at a time and keeps at most one newer chunk.
+/// Later chunks may begin with a short PCM overlap. Word timestamps from the
+/// same Whisper request exclude that overlap from filler and pace feedback.
 /// The final report never reads these temporary live results.
 class LiveFillerFeedbackService {
   LiveFillerFeedbackService({
@@ -49,10 +51,12 @@ class LiveFillerFeedbackService {
   final int paceWindowSize;
   final Future<Directory> Function() _temporaryDirectory;
   final List<double> _recentPaceValues = [];
-  Uint8List? _pending;
+  _QueuedLiveChunk? _pending;
   Future<void>? _working;
   bool _stopped = false;
-  int _nextChunkId = 0;
+  int _acceptedChunkCount = 0;
+  int _manualTranscriptCount = 0;
+  int? _lastProcessedSequence;
   String? _lastTranscript;
 
   bool get isStopped => _stopped;
@@ -61,31 +65,54 @@ class LiveFillerFeedbackService {
     if (_stopped || pcm.isEmpty) return;
     // When the API is slower than capture, retain only the newest complete
     // chunk. Do not build up requests, audio buffers, or temporary files.
-    _pending = pcm;
-    _working ??= _drain().whenComplete(() => _working = null);
+    _pending = _QueuedLiveChunk(
+      sequence: _acceptedChunkCount++,
+      pcm: pcm,
+      overlap: _overlapDuration(pcm.length),
+    );
+    _scheduleDrain();
+  }
+
+  void _scheduleDrain() {
+    if (_stopped || _working != null || _pending == null) return;
+    final work = _drain();
+    _working = work;
+    unawaited(
+      work.whenComplete(() {
+        _working = null;
+        // Recheck in case a stream event arrived while the completed Future's
+        // callback was queued. This prevents a newest pending chunk from being
+        // stranded during a tight completion/accept race.
+        _scheduleDrain();
+      }),
+    );
   }
 
   Future<void> _drain() async {
     while (!_stopped && _pending != null) {
-      final pcm = _pending!;
+      final chunk = _pending!;
       _pending = null;
-      final id = _nextChunkId++;
-      await _process(id, pcm);
+      await _process(chunk);
     }
   }
 
-  Future<void> _process(int id, Uint8List pcm) async {
+  Future<void> _process(_QueuedLiveChunk chunk) async {
     String? path;
     try {
       final directory = await _temporaryDirectory();
       path =
           '${directory.path}${Platform.pathSeparator}'
-          'speaksync-live-${DateTime.now().microsecondsSinceEpoch}-$id.wav';
-      await WavAudio.writeChunk(path, pcm);
+          'speaksync-live-${DateTime.now().microsecondsSinceEpoch}-'
+          '${chunk.sequence}.wav';
+      await WavAudio.writeChunk(path, chunk.pcm);
       if (_stopped) return;
-      final transcript = await transcriber.transcribe(path);
+      final result = await transcriber.transcribeWithWordTimestamps(path);
       if (_stopped) return;
-      handlePartialTranscript(transcript);
+      _handlePartialResult(
+        result,
+        sequence: chunk.sequence,
+        overlap: chunk.overlap,
+      );
     } on Object {
       // Network, rate-limit, timeout, invalid response, and file errors only
       // affect this live chunk. The full recording and timer keep running.
@@ -103,13 +130,53 @@ class LiveFillerFeedbackService {
 
   /// Feeds one Whisper result to both live features without another API call.
   void handlePartialTranscript(String transcript) {
+    _handlePartialResult(
+      GroqTranscriptionResult(text: transcript),
+      sequence: _manualTranscriptCount++,
+      overlap: Duration.zero,
+    );
+  }
+
+  void _handlePartialResult(
+    GroqTranscriptionResult result, {
+    required int sequence,
+    required Duration overlap,
+  }) {
     if (_stopped) return;
-    final normalized = FillerAnalysis.normalizeTranscript(transcript).trim();
+    final normalized = FillerAnalysis.normalizeTranscript(result.text).trim();
     if (normalized.isEmpty) return;
+
+    final isConsecutive =
+        _lastProcessedSequence == null ||
+        sequence == _lastProcessedSequence! + 1;
+    String novelTranscript;
+    String paceTranscript;
+    if (result.words.isNotEmpty) {
+      novelTranscript = transcriptAfterOverlap(result.words, overlap);
+      paceTranscript = novelTranscript;
+    } else {
+      // Some provider responses or test doubles may omit word timestamps.
+      // Exact suffix/prefix removal is a conservative fallback. Only compare
+      // consecutive processed chunks so a dropped pending request cannot make
+      // unrelated later speech look duplicated.
+      final repeatedPrefixEnd = isConsecutive
+          ? _repeatedPrefixEnd(_lastTranscript, normalized)
+          : 0;
+      novelTranscript = normalized.substring(repeatedPrefixEnd).trim();
+      // A non-overlapping response (including existing test doubles) has no
+      // carried audio to subtract from WPM. Keep exact-text suppression for
+      // filler alerts, but use its complete text for pace.
+      paceTranscript = overlap > Duration.zero ? novelTranscript : normalized;
+    }
+    _lastTranscript = normalized;
+    _lastProcessedSequence = sequence;
+    if (novelTranscript.isEmpty && paceTranscript.isEmpty) return;
 
     final paceCallback = onPace;
     if (paceCallback != null) {
-      final pace = SpeakingPace.fromTranscript(transcript, chunkDuration);
+      // The carried-over audio is context only. Count novel words against the
+      // normal ten-second capture cadence, not the longer uploaded WAV.
+      final pace = SpeakingPace.fromTranscript(paceTranscript, chunkDuration);
       final wpm = pace.wordsPerMinute;
       if (pace.totalWords >= minimumPaceWords && wpm != null) {
         _recentPaceValues.add(wpm);
@@ -129,29 +196,50 @@ class LiveFillerFeedbackService {
       }
     }
 
-    // Whisper can occasionally repeat the tail of the preceding chunk at the
-    // beginning of the next result. Suppress fillers inside that repeated
-    // token prefix, while still allowing alerts for new text later in the
-    // chunk. Live pace remains based on the complete ten-second result.
-    final repeatedPrefixEnd = _repeatedPrefixEnd(_lastTranscript, normalized);
-    _lastTranscript = normalized;
     final fillerCallback = onFiller;
     if (fillerCallback == null) return;
-    final analysis = FillerAnalysis.fromTranscript(transcript, Duration.zero);
-    if (analysis.offsets.isEmpty) return;
-    final newFillers = analysis.offsets.entries
-        .map(
-          (entry) => MapEntry(
-            entry.key,
-            entry.value.where((offset) => offset >= repeatedPrefixEnd).toList(),
-          ),
-        )
-        .where((entry) => entry.value.isNotEmpty);
-    if (newFillers.isEmpty) return;
-    final first = newFillers.reduce(
-      (a, b) => a.value.first < b.value.first ? a : b,
+    final analysis = FillerAnalysis.fromTranscript(
+      novelTranscript,
+      Duration.zero,
     );
-    fillerCallback(first.key);
+    if (analysis.offsets.isEmpty) return;
+    final detections = <({String word, int offset})>[
+      for (final entry in analysis.offsets.entries)
+        for (final offset in entry.value) (word: entry.key, offset: offset),
+    ]..sort((a, b) => a.offset.compareTo(b.offset));
+    for (final detection in detections) {
+      fillerCallback(detection.word);
+    }
+  }
+
+  /// Returns only words whose midpoint belongs to the new portion of a live
+  /// chunk. A word crossing the boundary is assigned to the side containing
+  /// most of it, which preserves natural repetitions after the boundary.
+  static String transcriptAfterOverlap(
+    List<GroqTranscribedWord> words,
+    Duration overlap,
+  ) {
+    final boundary = overlap.inMicroseconds / Duration.microsecondsPerSecond;
+    return words
+        .where((word) => (word.startSeconds + word.endSeconds) / 2 >= boundary)
+        .map((word) => word.word.trim())
+        .where((word) => word.isNotEmpty)
+        .join(' ');
+  }
+
+  Duration _overlapDuration(int pcmBytes) {
+    final expectedBytes =
+        chunkDuration.inMicroseconds *
+        WavAudio.bytesPerSecond ~/
+        Duration.microsecondsPerSecond;
+    final overlapBytes = pcmBytes - expectedBytes;
+    if (overlapBytes <= 0) return Duration.zero;
+    return Duration(
+      microseconds:
+          overlapBytes *
+          Duration.microsecondsPerSecond ~/
+          WavAudio.bytesPerSecond,
+    );
   }
 
   static int _repeatedPrefixEnd(String? previous, String current) {
@@ -195,4 +283,16 @@ class LiveFillerFeedbackService {
     _pending = null;
     await _working;
   }
+}
+
+class _QueuedLiveChunk {
+  const _QueuedLiveChunk({
+    required this.sequence,
+    required this.pcm,
+    required this.overlap,
+  });
+
+  final int sequence;
+  final Uint8List pcm;
+  final Duration overlap;
 }

@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 
+import 'speech_audio_config.dart';
+
 enum AmbientNoiseLevel { quiet, moderate, noisy }
 
 /// Prototype thresholds, NOT scientifically validated. Calibrate using
@@ -99,16 +101,7 @@ class _MicrophoneNoiseInput implements AmbientNoiseInput {
       throw const _NoisePermissionDenied();
     }
     final recorder = _recorder = AudioRecorder();
-    return recorder.startStream(
-      const RecordConfig(
-        encoder: AudioEncoder.pcm16bits,
-        sampleRate: 16000,
-        numChannels: 1,
-        autoGain: false,
-        echoCancel: false,
-        noiseSuppress: false,
-      ),
-    );
+    return recorder.startStream(SpeechAudioConfig.pcm16);
   }
 
   @override

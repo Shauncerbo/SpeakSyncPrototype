@@ -34,7 +34,6 @@ import '../state/app_state.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/speaking_pace_card.dart';
 import '../widgets/filler_frequency_card.dart';
-import '../widgets/pose_landmark_overlay.dart';
 import 'main_shell.dart';
 
 class PracticeSetupScreen extends StatefulWidget {
@@ -245,8 +244,8 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                             ),
                             const SizedBox(height: 5),
                             const Text(
-                              'Choose the prepared script you will rehearse. '
-                              'SpeakSync will extract its text for comparison.',
+                              'Upload a prepared document, or type or paste '
+                              'the script you will rehearse below.',
                               style: TextStyle(
                                 color: Color(0xFF617085),
                                 fontSize: 13,
@@ -336,18 +335,20 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                               maxLines: 8,
                               textCapitalization: TextCapitalization.sentences,
                               decoration: const InputDecoration(
-                                labelText: 'Extracted script text',
-                                hintText: 'The extracted text appears here',
+                                labelText: 'Reference script text',
+                                hintText:
+                                    'Type, paste, or upload your speech script',
                                 helperText:
-                                    'You may correct extraction mistakes before continuing.',
+                                    'Uploaded text can be corrected before continuing.',
                                 alignLabelWithHint: true,
                               ),
                               validator: (value) {
-                                if (_referenceDocumentName == null) {
-                                  return 'Please choose your speech document.';
-                                }
                                 if (value == null || value.trim().isEmpty) {
-                                  return 'The reference script cannot be empty.';
+                                  return 'Please type, paste, or upload your reference script.';
+                                }
+                                if (value.trim().length >
+                                    ScriptComparisonService.maxTextCharacters) {
+                                  return 'The reference script is too long.';
                                 }
                                 return null;
                               },
@@ -1075,10 +1076,6 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   final ValueNotifier<String> _postureStatus = ValueNotifier(
     'Position yourself',
   );
-  final ValueNotifier<PoseOverlayFrame?> _poseOverlayFrame = ValueNotifier(
-    null,
-  );
-  final ValueNotifier<bool> _showPoseLandmarks = ValueNotifier(false);
   final ValueNotifier<CameraFramingState> _cameraFramingStatus = ValueNotifier(
     CameraFramingState.unavailable,
   );
@@ -1109,9 +1106,10 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   Timer? _noiseRefreshTimer;
   final _microphoneLevel = ValueNotifier<double>(0);
   StreamSubscription<double>? _levelSubscription;
-  final _transcriptionService = GroqTranscriptionService(
+  final _transcriptionService = GroqTranscriptionService.finalRecording(
     apiKey: AppConfig.groqApiKey,
-    prompt: GroqTranscriptionService.fillerAwarePrompt,
+    model: AppConfig.finalTranscriptionModel,
+    enableContextPrompt: AppConfig.transcriptionContextEnabled,
   );
   String? _alert;
   String? _performanceAlert;
@@ -1430,9 +1428,9 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       final setup = AppStateScope.of(context, listen: false).currentSetup!;
       final transcriber =
           widget.liveTranscriptionService ??
-          GroqTranscriptionService(
+          GroqTranscriptionService.liveFeedback(
             apiKey: AppConfig.groqApiKey,
-            timeout: const Duration(seconds: 8),
+            enableContextPrompt: AppConfig.transcriptionContextEnabled,
           );
       void onFiller(String word) {
         if (!mounted ||
@@ -1739,7 +1737,6 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       _postureStreamActive = false;
       _posture = 'Unavailable';
       _postureStatus.value = _posture;
-      _poseOverlayFrame.value = null;
       _interruptFaceAnalysis();
     } finally {
       _visualStarting = false;
@@ -1770,8 +1767,6 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     _postureDiagnostics.reset();
     _postureDiagnosticsTimer?.cancel();
     _postureDiagnosticsTimer = null;
-    _poseOverlayFrame.value = null;
-    _showPoseLandmarks.value = false;
     _resetPostureWarning();
     _cameraFramingTracker.reset();
     _framingSummary.interrupt();
@@ -1812,8 +1807,6 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     _postureWarningController.reset();
     _postureFrameGate.reset();
     _postureDiagnostics.reset();
-    _poseOverlayFrame.value = null;
-    _showPoseLandmarks.value = false;
     _cameraFramingStatus.value = CameraFramingState.unavailable;
     _postureWarning.value = null;
     _posture = 'Position yourself';
@@ -1907,16 +1900,6 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       }
       if (!setup.monitorBodyLanguage) return;
       final landmarks = result.landmarks;
-      _poseOverlayFrame.value = landmarks == null
-          ? null
-          : PoseOverlayFrame(
-              landmarks: landmarks,
-              imageWidth: result.inferenceWidth,
-              imageHeight: result.inferenceHeight,
-              mirrorHorizontally:
-                  controller.description.lensDirection ==
-                  CameraLensDirection.front,
-            );
       final frameClassification = _postureTracker.analyzer
           .analyze(landmarks)
           .classification;
@@ -2403,8 +2386,6 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     await _stopPostureAnalysis(closeLandmarker: true);
     await _cameraController?.dispose();
     _postureStatus.dispose();
-    _poseOverlayFrame.dispose();
-    _showPoseLandmarks.dispose();
     _cameraFramingStatus.dispose();
     _postureWarning.dispose();
     _framingWarning.dispose();
@@ -2521,8 +2502,6 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                                       _recording &&
                                       !_restarting &&
                                       !_ending,
-                                  showPoseLandmarks: _showPoseLandmarks,
-                                  poseOverlayFrames: _poseOverlayFrame,
                                   feedback: LiveFeedbackOverlay(
                                     enabled:
                                         !_ending &&
@@ -2615,29 +2594,6 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                       ],
                       if (_hasStarted) ...[
                         const SizedBox(height: 10),
-                        if (kDebugMode && setup.monitorBodyLanguage) ...[
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF10243A),
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: const Color(0xFF29435E),
-                              ),
-                            ),
-                            child: ValueListenableBuilder<bool>(
-                              valueListenable: _showPoseLandmarks,
-                              builder: (context, show, child) =>
-                                  PoseOverlayDebugToggle(
-                                    value: show,
-                                    onChanged: (value) {
-                                      _showPoseLandmarks.value = value;
-                                    },
-                                  ),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                        ],
                         ResponsiveCardGrid(
                           spacing: 10,
                           children: [
@@ -2883,8 +2839,6 @@ class _CameraStage extends StatelessWidget {
     required this.cameraEnabled,
     required this.cameraStatus,
     required this.recording,
-    required this.showPoseLandmarks,
-    required this.poseOverlayFrames,
     required this.feedback,
   });
 
@@ -2893,8 +2847,6 @@ class _CameraStage extends StatelessWidget {
   final bool cameraEnabled;
   final String cameraStatus;
   final bool recording;
-  final ValueListenable<bool> showPoseLandmarks;
-  final ValueListenable<PoseOverlayFrame?> poseOverlayFrames;
   final Widget feedback;
 
   @override
@@ -3038,12 +2990,6 @@ class _CameraStage extends StatelessWidget {
                   ColoredBox(
                     color: const Color(0xFF071526),
                     child: SizedBox.expand(child: preview),
-                  ),
-                  ValueListenableBuilder<bool>(
-                    valueListenable: showPoseLandmarks,
-                    builder: (context, show, child) => show
-                        ? PoseLandmarkOverlay(frames: poseOverlayFrames)
-                        : const SizedBox.shrink(),
                   ),
                   Positioned.fill(child: feedback),
                   if (showRecordingBadge)

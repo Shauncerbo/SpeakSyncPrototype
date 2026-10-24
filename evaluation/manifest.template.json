@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "recordings": [
+    {
+      "recordingId": "anonymous_recording_001",
+      "consentConfirmed": false,
+      "referenceVerified": false,
+      "languageGroup": "code_switched",
+      "audioPath": "private/anonymous_recording_001.wav",
+      "referenceTranscriptPath": "private/anonymous_recording_001_reference.txt",
+      "rehearsalDurationSeconds": 60.0,
+      "audioDurationSeconds": 60.0,
+      "environment": "quiet",
+      "speakingVolume": "normal",
+      "microphone": "built_in",
+      "boundaryCase": "fillers_near_10_second_boundaries",
+      "interruptionNotes": "none",
+      "hypotheses": {
+        "turbo_context_off": {
+          "transcriptPath": "private/anonymous_recording_001_turbo_context_off.txt",
+          "latencyMs": null
+        },
+        "turbo_context_on": {
+          "transcriptPath": "private/anonymous_recording_001_turbo_context_on.txt",
+          "latencyMs": null
+        },
+        "large_v3_context_off": {
+          "transcriptPath": "private/anonymous_recording_001_large_v3_context_off.txt",
+          "latencyMs": null
+        },
+        "large_v3_context_on": {
+          "transcriptPath": "private/anonymous_recording_001_large_v3_context_on.txt",
+          "latencyMs": null
+        }
+      }
+    }
+  ]
+}

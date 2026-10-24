@@ -110,19 +110,14 @@ void main() {
     );
   });
 
-  test('overlay setting cannot change posture calculation', () {
+  test('posture calculation remains operational without a mounted overlay', () {
     final tracker = PostureSessionTracker();
     for (var index = 0; index < 8; index++) {
       tracker.addFrame(landmarks, Duration(milliseconds: index * 500));
     }
-    final before = tracker.summary.acceptablePercentage;
-    final showOverlay = ValueNotifier(false);
 
-    showOverlay.value = true;
-
-    expect(tracker.summary.acceptablePercentage, before);
+    expect(tracker.summary.acceptablePercentage, 100);
     expect(tracker.status, PostureDisplayStatus.good);
-    showOverlay.dispose();
   });
 
   test('camera rotation handles portrait and landscape for front camera', () {

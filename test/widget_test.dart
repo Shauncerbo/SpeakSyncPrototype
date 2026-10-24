@@ -7,6 +7,7 @@ import 'package:speaksync_prototype/models/practice_session.dart';
 import 'package:speaksync_prototype/screens/practice_flow.dart';
 import 'package:speaksync_prototype/services/internet_connectivity_service.dart';
 import 'package:speaksync_prototype/state/app_state.dart';
+import 'package:speaksync_prototype/widgets/pose_landmark_overlay.dart';
 
 class _FakeInternetConnectivity implements InternetConnectivity {
   _FakeInternetConnectivity(this._connected);
@@ -200,6 +201,57 @@ void main() {
     await tester.pump();
   });
 
+  for (final speechType in ['Prepared', 'Persuasive']) {
+    testWidgets('$speechType accepts a manually typed reference script', (
+      tester,
+    ) async {
+      await setPhoneSize(tester);
+      final state = await openHome(tester);
+      await openSetup(tester);
+      await tester.enterText(
+        find.byKey(const Key('speech_title')),
+        '$speechType Speech',
+      );
+      await tester.tap(find.byKey(const Key('speech_type')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(speechType).last);
+      await tester.pumpAndSettle();
+      final scriptField = find.byKey(const Key('speech_content'));
+      await tester.ensureVisible(scriptField);
+      await tester.enterText(
+        scriptField,
+        'Good morning. This is my manually entered reference script.',
+      );
+      final languageField = find.byKey(const Key('language_mode'));
+      await tester.ensureVisible(languageField);
+      await tester.pumpAndSettle();
+      await tester.tap(languageField);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Mixed Language').last);
+      await tester.pumpAndSettle();
+      final durationField = find.byKey(const Key('duration'));
+      await tester.ensureVisible(durationField);
+      await tester.pumpAndSettle();
+      await tester.tap(durationField);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('1 minute').last);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('setup_continue')));
+      await tester.tap(find.byKey(const Key('setup_continue')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(DeviceCheckScreen), findsOneWidget);
+      expect(state.currentSetup?.speechType, speechType);
+      expect(
+        state.currentSetup?.speechContent,
+        'Good morning. This is my manually entered reference script.',
+      );
+      expect(state.currentSetup?.referenceDocumentName, isNull);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    });
+  }
+
   testWidgets('Preview and countdown time are excluded from the saved report', (
     tester,
   ) async {
@@ -320,6 +372,8 @@ void main() {
     expect(find.byKey(const Key('toggle_microphone')), findsOneWidget);
     expect(find.byKey(const Key('toggle_camera')), findsOneWidget);
     expect(find.text('Fillers Detected'), findsOneWidget);
+    expect(find.byKey(const Key('show_pose_landmarks_toggle')), findsNothing);
+    expect(find.byType(PoseLandmarkOverlay), findsNothing);
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
