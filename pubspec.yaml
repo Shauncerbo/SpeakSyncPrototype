@@ -48,6 +48,8 @@ dependencies:
   record: ^6.2.1
   # Pinned for compatibility with the project's current Android Gradle plugin.
   wakelock_plus: 1.6.1
+  firebase_core: ^5.1.0
+  firebase_auth: ^7.0.1
 
 dev_dependencies:
   flutter_test:

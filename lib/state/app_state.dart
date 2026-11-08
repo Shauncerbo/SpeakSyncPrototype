@@ -4,19 +4,31 @@ import '../data/dummy_data.dart';
 import '../models/app_preferences.dart';
 import '../models/practice_session.dart';
 import '../models/practice_settings.dart';
+import '../models/user_model.dart';
+import '../storage/hive_box_names.dart';
 import '../storage/hive_repository.dart';
 
 class AppState extends ChangeNotifier {
-  AppState({HiveRepository? repository, String? initialStorageError})
-    : _repository = repository,
-      _sessions = repository == null ? initialSessions() : [],
-      _preferences = initialPreferences,
-      _storageError = initialStorageError,
-      _isLoading = repository != null;
+  AppState({
+    HiveRepository? repository,
+    String? initialStorageError,
+    bool useDemoData = true,
+  }) : _repository = repository,
+       _useDemoData = useDemoData,
+       _sessions = repository == null && useDemoData ? initialSessions() : [],
+       _preferences = initialPreferences,
+       _activeUserId = repository == null && useDemoData
+           ? AppUserIds.demo
+           : null,
+       _storageError = initialStorageError,
+       _isLoading = repository != null;
 
   final HiveRepository? _repository;
+  final bool _useDemoData;
   List<PracticeSession> _sessions;
   AppPreferences _preferences;
+  String? _activeUserId;
+  User? _currentUserProfile;
   bool _isLoading;
   String? _storageError;
   PracticeSettings? currentSetup;
@@ -24,6 +36,11 @@ class AppState extends ChangeNotifier {
 
   List<PracticeSession> get sessions => List.unmodifiable(_sessions);
   AppPreferences get preferences => _preferences;
+  String? get activeUserId => _activeUserId;
+  User? get currentUserProfile => _currentUserProfile;
+  bool get isDemoUser => _activeUserId == AppUserIds.demo;
+  bool get hasAuthenticatedUser =>
+      _activeUserId != null && _activeUserId != AppUserIds.demo;
   bool get isLoading => _isLoading;
   String? get storageError => _storageError;
 
@@ -42,10 +59,18 @@ class AppState extends ChangeNotifier {
         sessions: initialSessions(),
         preferences: initialPreferences,
       );
-      _preferences =
-          repository.getPreferences(initialPreferences.userId) ??
-          initialPreferences;
-      _sessions = repository.getPracticeSessions(initialPreferences.userId);
+      if (_useDemoData) {
+        _activeUserId = AppUserIds.demo;
+        _currentUserProfile = repository.getUserProfile(AppUserIds.demo);
+        _preferences =
+            repository.getPreferences(AppUserIds.demo) ?? initialPreferences;
+        _sessions = repository.getPracticeSessions(AppUserIds.demo);
+      } else {
+        _activeUserId = null;
+        _currentUserProfile = null;
+        _preferences = initialPreferences;
+        _sessions = [];
+      }
       _storageError = null;
     } catch (error) {
       _storageError = error.toString();
@@ -67,6 +92,136 @@ class AppState extends ChangeNotifier {
 
   Duration get totalPracticeTime =>
       _sessions.fold(Duration.zero, (total, item) => total + item.duration);
+
+  Future<void> activateAuthenticatedUser({
+    required String userId,
+    required String email,
+    String? displayName,
+    String? firstName,
+    String? middleName,
+    String? lastName,
+  }) async {
+    final normalizedUserId = userId.trim();
+    final normalizedEmail = email.trim().toLowerCase();
+    if (normalizedUserId.isEmpty || normalizedUserId == AppUserIds.demo) {
+      throw const StorageException('A valid Firebase UID is required');
+    }
+    if (normalizedEmail.isEmpty) {
+      throw const StorageException('The authenticated account has no email');
+    }
+
+    // Clear the previous account synchronously before any storage work so its
+    // sessions can never flash while another account is being activated.
+    _activeUserId = normalizedUserId;
+    _currentUserProfile = null;
+    _sessions = [];
+    currentSetup = null;
+    currentReport = null;
+    _preferences = initialPreferences.copyWith(userId: normalizedUserId);
+    _isLoading = true;
+    notifyListeners();
+
+    final names = _resolveNames(
+      displayName: displayName,
+      firstName: firstName,
+      middleName: middleName,
+      lastName: lastName,
+    );
+    final repository = _repository;
+    try {
+      if (repository == null) {
+        _currentUserProfile = User(
+          userId: normalizedUserId,
+          firstName: names.firstName,
+          middleName: names.middleName,
+          lastName: names.lastName,
+          email: normalizedEmail,
+          createdAt: DateTime.now(),
+        );
+        _storageError ??=
+            'Local storage is unavailable. New results will not persist after the app closes.';
+        return;
+      }
+
+      var profile = repository.getUserProfile(normalizedUserId);
+      if (profile == null) {
+        profile = User(
+          userId: normalizedUserId,
+          firstName: names.firstName,
+          middleName: names.middleName,
+          lastName: names.lastName,
+          email: normalizedEmail,
+          createdAt: DateTime.now(),
+        );
+        await repository.saveUserProfile(profile);
+      }
+      var userPreferences = repository.getPreferences(normalizedUserId);
+      if (userPreferences == null) {
+        userPreferences = initialPreferences.copyWith(userId: normalizedUserId);
+        await repository.savePreferences(userPreferences);
+      }
+      _currentUserProfile = profile;
+      _preferences = userPreferences;
+      _sessions = repository.getPracticeSessions(normalizedUserId);
+      _storageError = null;
+    } catch (error) {
+      _sessions = [];
+      _storageError = error.toString();
+      rethrow;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  void clearAuthenticatedUser() {
+    _activeUserId = null;
+    _currentUserProfile = null;
+    _sessions = [];
+    _preferences = initialPreferences;
+    currentSetup = null;
+    currentReport = null;
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  static ({String firstName, String? middleName, String lastName})
+  _resolveNames({
+    String? displayName,
+    String? firstName,
+    String? middleName,
+    String? lastName,
+  }) {
+    final explicitFirst = firstName?.trim() ?? '';
+    final explicitLast = lastName?.trim() ?? '';
+    if (explicitFirst.isNotEmpty && explicitLast.isNotEmpty) {
+      final middle = middleName?.trim();
+      return (
+        firstName: explicitFirst,
+        middleName: middle?.isEmpty == true ? null : middle,
+        lastName: explicitLast,
+      );
+    }
+    final parts = (displayName ?? '')
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .toList();
+    if (parts.length >= 2) {
+      return (
+        firstName: parts.first,
+        middleName: parts.length > 2
+            ? parts.sublist(1, parts.length - 1).join(' ')
+            : null,
+        lastName: parts.last,
+      );
+    }
+    return (
+      firstName: parts.isEmpty ? 'Student' : parts.first,
+      middleName: null,
+      lastName: 'Speaker',
+    );
+  }
 
   void setCurrentSetup(PracticeSettings settings) {
     currentSetup = settings;
@@ -91,11 +246,18 @@ class AppState extends ChangeNotifier {
     }
 
     try {
+      final userId = _activeUserId;
+      if (userId == null) {
+        throw const StorageException(
+          'Sign in before saving a rehearsal report',
+        );
+      }
       final saved = await repository.saveCompletedRehearsal(
         practiceSession: report,
         settings: currentSetup,
+        userId: userId,
       );
-      _sessions = repository.getPracticeSessions(preferences.userId);
+      _sessions = repository.getPracticeSessions(userId);
       _storageError = null;
       notifyListeners();
       return saved;
@@ -107,6 +269,12 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> updatePreferences(AppPreferences preferences) async {
+    final activeUserId = _activeUserId;
+    if (activeUserId != null && preferences.userId != activeUserId) {
+      throw const StorageException(
+        'Preferences cannot be saved for another user',
+      );
+    }
     final previous = _preferences;
     _preferences = preferences;
     notifyListeners();
@@ -122,6 +290,11 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> clearPrototypeData() async {
+    if (!isDemoUser) {
+      throw const StorageException(
+        'Prototype data controls are available only for the demo profile',
+      );
+    }
     try {
       if (_repository == null) {
         _sessions = [];
@@ -141,6 +314,11 @@ class AppState extends ChangeNotifier {
   }
 
   Future<int> restoreDemoData() async {
+    if (!isDemoUser) {
+      throw const StorageException(
+        'Demo sessions cannot be added to a student account',
+      );
+    }
     try {
       final repository = _repository;
       int restored;

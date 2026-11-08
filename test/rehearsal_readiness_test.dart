@@ -218,10 +218,12 @@ void main() {
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => RehearsalScreen(
+                      enforceDeviceReadiness: false,
                       internetConnectivity: _Online(),
                       audioRecorder: recorder,
                       ambientNoiseService: noise,
-                      liveTranscriptionService: liveWhisper,
+                      liveTranscriptionService:
+                          liveWhisper ?? _LiveWhisper(() async => ''),
                       screenAwakeController: screenAwake ?? _ScreenAwake(),
                       liveFeedbackFactory: inMemoryLiveFeedback
                           ? (transcriber, onFiller, onPace, chunkDuration) =>
@@ -294,7 +296,7 @@ void main() {
     await preview(tester, _Recorder(), liveFeedback: false);
     expect(find.text('Ambient noise: Unavailable'), findsOneWidget);
     expect(
-      find.text('Allow camera access to check your framing.'),
+      find.textContaining('Camera not detected or unavailable'),
       findsOneWidget,
     );
     expect(find.textContaining('Microphone permission needed'), findsOneWidget);
@@ -513,7 +515,7 @@ void main() {
         await tester.pump(const Duration(seconds: 1));
       }
       await tester.pump();
-      expect(recorder.starts, AppConfig.hasGroqApiKey ? 1 : 0);
+      expect(recorder.starts, 1);
       expect(find.text('01:00'), findsOneWidget);
       expect(screenAwake.enableCalls, 1);
       await tester.pumpWidget(const SizedBox());
@@ -625,6 +627,8 @@ void main() {
         findsOneWidget,
       );
       expect(recorder.liveChunksRequested, isFalse);
+      expect(find.byKey(const Key('rehearsal_timer')), findsNothing);
+      expect(find.byKey(const Key('rehearsal_readiness')), findsOneWidget);
       await tester.pump(const Duration(milliseconds: 2500));
       expect(notice, findsNothing);
       await tester.pumpWidget(const SizedBox());

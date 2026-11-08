@@ -1,24 +1,29 @@
 import 'package:flutter/material.dart';
+
+import 'auth_service.dart';
+import 'core/app_theme.dart';
+import 'screens/email_verification_screen.dart';
 import 'widgets/common_widgets.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.initialMessage});
+
+  final String? initialMessage;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  // Temporary development shortcut. Set this to false to restore the existing
-  // email/password validation and mock account check below.
-  bool get _bypassLoginForDevelopment => true;
-
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
   bool _isPasswordHidden = true;
   bool _isLoading = false;
+
+  AuthService _auth(BuildContext context) =>
+      AuthServiceScope.maybeOf(context) ?? const UnavailableAuthService();
 
   @override
   void dispose() {
@@ -27,36 +32,104 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  // --- TEMPORARY MOCK LOGIN LOGIC ---
-  void _submitLogin() async {
-    if (_bypassLoginForDevelopment) {
-      Navigator.of(context).pushReplacementNamed('/home');
-      return;
-    }
-
+  Future<void> _submitLogin() async {
     if (!_formKey.currentState!.validate()) return;
-
     setState(() => _isLoading = true);
-
-    final email = _emailController.text.trim();
-    final password = _passwordController.text;
-
-    // Simulate a network request taking 2 seconds (makes the UI look realistic!)
-    await Future.delayed(const Duration(seconds: 2));
-    // HARDCODED CREDENTIALS: Change these to whatever you want to use for testing
-    const String scriptedEmail = "student@speaksync.com";
-    const String scriptedPassword = "capstone123";
-
-    if (mounted) {
-      if (email == scriptedEmail && password == scriptedPassword) {
-        Navigator.of(context).pushReplacementNamed('/home');
-      } else {
-        _showErrorSnackBar('Invalid credentials.');
+    try {
+      final user = await _auth(context).signIn(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
+      if (!mounted) return;
+      if (!user.emailVerified) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute<void>(
+            builder: (_) => const EmailVerificationScreen(),
+          ),
+          (route) => false,
+        );
+        return;
       }
-      setState(() => _isLoading = false);
+      Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
+    } on AuthFailure catch (error) {
+      if (mounted) _showErrorSnackBar(error.message);
+    } catch (_) {
+      if (mounted) {
+        _showErrorSnackBar(
+          'Unable to sign in right now. Check your connection and try again.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
-  // ----------------------------------
+
+  Future<void> _resetPassword() async {
+    var resetEmail = _emailController.text;
+    String? validationMessage;
+    final email = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Reset password'),
+          content: TextFormField(
+            key: const Key('password_reset_email'),
+            initialValue: resetEmail,
+            keyboardType: TextInputType.emailAddress,
+            autofocus: true,
+            onChanged: (value) => resetEmail = value,
+            decoration: InputDecoration(
+              labelText: 'Email Address',
+              errorText: validationMessage,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              key: const Key('send_password_reset'),
+              onPressed: () {
+                final value = resetEmail.trim();
+                if (!AuthService.isValidEmail(value)) {
+                  setDialogState(
+                    () => validationMessage =
+                        'Please enter a valid email address.',
+                  );
+                  return;
+                }
+                Navigator.of(dialogContext).pop(value);
+              },
+              child: const Text('Send Reset Email'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (email == null || !mounted) return;
+    setState(() => _isLoading = true);
+    try {
+      await _auth(context).sendPasswordResetEmail(email);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'If an account exists for that email, Firebase sent password-reset instructions.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } on AuthFailure catch (error) {
+      if (mounted) _showErrorSnackBar(error.message);
+    } catch (_) {
+      if (mounted) {
+        _showErrorSnackBar('Unable to request a password reset right now.');
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   void _showErrorSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -110,15 +183,35 @@ class _LoginScreenState extends State<LoginScreen> {
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Color(0xFF9EB1C7)),
                       ),
+                      if (widget.initialMessage != null ||
+                          !_auth(context).isAvailable) ...[
+                        const SizedBox(height: 18),
+                        Container(
+                          key: const Key('authentication_unavailable'),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: errorRed.withValues(alpha: .18),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            widget.initialMessage ??
+                                _auth(context).unavailableMessage ??
+                                'Firebase Authentication is unavailable.',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 48),
 
                       // Email Input
                       TextFormField(
+                        key: const Key('login_email'),
                         controller: _emailController,
                         keyboardType: TextInputType.emailAddress,
                         style: const TextStyle(color: Colors.white),
                         decoration: InputDecoration(
-                          labelText: 'SHS Email Address',
+                          labelText: 'Email Address',
                           labelStyle: const TextStyle(color: Color(0xFF9EB1C7)),
                           prefixIcon: const Icon(
                             Icons.email_outlined,
@@ -143,6 +236,9 @@ class _LoginScreenState extends State<LoginScreen> {
                           if (value == null || value.trim().isEmpty) {
                             return 'Please enter your email address.';
                           }
+                          if (!AuthService.isValidEmail(value)) {
+                            return 'Please enter a valid email address.';
+                          }
                           return null;
                         },
                       ),
@@ -150,6 +246,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                       // Password Input
                       TextFormField(
+                        key: const Key('login_password'),
                         controller: _passwordController,
                         obscureText: _isPasswordHidden,
                         style: const TextStyle(color: Colors.white),
@@ -194,6 +291,14 @@ class _LoginScreenState extends State<LoginScreen> {
                           }
                           return null;
                         },
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          key: const Key('forgot_password'),
+                          onPressed: _isLoading ? null : _resetPassword,
+                          child: const Text('Forgot password?'),
+                        ),
                       ),
                       const SizedBox(height: 32),
 

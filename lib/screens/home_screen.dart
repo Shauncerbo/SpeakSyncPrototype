@@ -57,7 +57,7 @@ class HomeScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 30),
                   Text(
-                    'Hello, Speaker!',
+                    'Hello, ${state.currentUserProfile?.firstName ?? 'Speaker'}!',
                     style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                       fontWeight: FontWeight.w900,
                       color: navy,

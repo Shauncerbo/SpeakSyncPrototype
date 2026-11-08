@@ -9,6 +9,9 @@ import 'package:speaksync_prototype/services/internet_connectivity_service.dart'
 import 'package:speaksync_prototype/state/app_state.dart';
 import 'package:speaksync_prototype/widgets/pose_landmark_overlay.dart';
 
+import 'support/rehearsal_test_doubles.dart';
+import 'support/fake_auth_service.dart';
+
 class _FakeInternetConnectivity implements InternetConnectivity {
   _FakeInternetConnectivity(this._connected);
 
@@ -36,11 +39,28 @@ void main() {
     addTearDown(tester.view.reset);
   }
 
+  Future<void> pumpUntilFound(
+    WidgetTester tester,
+    Finder finder, {
+    Duration step = const Duration(milliseconds: 100),
+    int attempts = 40,
+  }) async {
+    for (
+      var attempt = 0;
+      attempt < attempts && finder.evaluate().isEmpty;
+      attempt++
+    ) {
+      await tester.pump(step);
+    }
+  }
+
   Future<AppState> openHome(
     WidgetTester tester, {
     InternetConnectivity? internetConnectivity,
   }) async {
     final state = AppState();
+    final auth = FakeAuthService();
+    addTearDown(auth.dispose);
     final connectivity =
         internetConnectivity ?? _FakeInternetConnectivity(true);
     if (internetConnectivity == null) {
@@ -49,16 +69,28 @@ void main() {
     await tester.pumpWidget(
       SpeakSyncApp(
         appState: state,
+        authService: auth,
         splashDuration: Duration.zero,
         analysisDuration: Duration.zero,
         deviceCheckDuration: Duration.zero,
         internetConnectivity: connectivity,
+        enforceDeviceReadiness: false,
+        rehearsalAudioRecorderFactory: SuccessfulRehearsalAudioRecorder.new,
+        liveTranscriptionService: StubGroqTranscriptionService(),
       ),
     );
     await tester.pump(Duration.zero);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('onboarding_skip')));
     await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('login_email')),
+      'student@example.com',
+    );
+    await tester.enterText(
+      find.byKey(const Key('login_password')),
+      'password123',
+    );
     await tester.tap(find.text('Sign In'));
     await tester.pumpAndSettle();
     return state;
@@ -73,6 +105,7 @@ void main() {
     WidgetTester tester, {
     String duration = '3 minutes',
     bool openPreview = true,
+    bool liveFeedback = false,
   }) async {
     await tester.enterText(
       find.byKey(const Key('speech_title')),
@@ -90,6 +123,13 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text(duration).last);
     await tester.pumpAndSettle();
+    final liveFeedbackSwitch = find.byKey(const Key('setup_live_feedback'));
+    await tester.ensureVisible(liveFeedbackSwitch);
+    if (tester.widget<SwitchListTile>(liveFeedbackSwitch).value !=
+        liveFeedback) {
+      await tester.tap(liveFeedbackSwitch);
+      await tester.pump();
+    }
     await tester.ensureVisible(find.byKey(const Key('setup_continue')));
     await tester.tap(find.byKey(const Key('setup_continue')));
     await tester.pumpAndSettle();
@@ -120,9 +160,15 @@ void main() {
   testWidgets('1. Splash loads', (tester) async {
     await setPhoneSize(tester);
     final connectivity = _FakeInternetConnectivity(true);
+    final auth = FakeAuthService();
     addTearDown(connectivity.dispose);
+    addTearDown(auth.dispose);
     await tester.pumpWidget(
-      SpeakSyncApp(appState: AppState(), internetConnectivity: connectivity),
+      SpeakSyncApp(
+        appState: AppState(),
+        authService: auth,
+        internetConnectivity: connectivity,
+      ),
     );
 
     expect(find.text('SpeakSync'), findsOneWidget);
@@ -137,10 +183,13 @@ void main() {
     await setPhoneSize(tester);
     final state = AppState();
     final connectivity = _FakeInternetConnectivity(true);
+    final auth = FakeAuthService();
     addTearDown(connectivity.dispose);
+    addTearDown(auth.dispose);
     await tester.pumpWidget(
       SpeakSyncApp(
         appState: state,
+        authService: auth,
         splashDuration: Duration.zero,
         internetConnectivity: connectivity,
       ),
@@ -154,10 +203,18 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('get_started')));
     await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('login_email')),
+      'student@example.com',
+    );
+    await tester.enterText(
+      find.byKey(const Key('login_password')),
+      'password123',
+    );
     await tester.tap(find.text('Sign In'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Hello, Speaker!'), findsOneWidget);
+    expect(find.text('Hello, Test!'), findsOneWidget);
   });
 
   testWidgets('3. Start Practice opens setup', (tester) async {
@@ -468,7 +525,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
-    await tester.pumpAndSettle();
+    await pumpUntilFound(tester, find.text('Performance Report'));
 
     expect(find.text('Performance Report'), findsOneWidget);
     expect(find.text('Environmental Awareness Speech'), findsOneWidget);
@@ -494,7 +551,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
-    await tester.pumpAndSettle();
+    await pumpUntilFound(tester, find.text('Performance Report'));
 
     expect(find.text('Performance Report'), findsOneWidget);
     expect(state.currentReport?.duration, const Duration(minutes: 1));
@@ -522,6 +579,12 @@ void main() {
       await tester.tap(find.byKey(const Key('confirm_restart_session')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
+      await pumpUntilFound(
+        tester,
+        find.text('01:00'),
+        step: const Duration(milliseconds: 20),
+        attempts: 100,
+      );
       expect(find.text('01:00'), findsOneWidget);
       expect(state.sessions.length, savedCount);
       expect(

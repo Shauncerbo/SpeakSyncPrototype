@@ -14,6 +14,8 @@ import 'package:speaksync_prototype/screens/splash_onboarding.dart';
 import 'package:speaksync_prototype/services/internet_connectivity_service.dart';
 import 'package:speaksync_prototype/state/app_state.dart';
 
+import 'support/rehearsal_test_doubles.dart';
+
 class _Online implements InternetConnectivity {
   @override
   Future<bool> check() async => true;
@@ -46,8 +48,18 @@ void main() {
     'privacy dialog': () => const MainShell(initialIndex: 2),
     'setup': () => const PracticeSetupScreen(),
     'device check': () => const DeviceCheckScreen(),
-    'preview': () => RehearsalScreen(internetConnectivity: _Online()),
-    'rehearsal': () => RehearsalScreen(internetConnectivity: _Online()),
+    'preview': () => RehearsalScreen(
+      internetConnectivity: _Online(),
+      enforceDeviceReadiness: false,
+      audioRecorder: SuccessfulRehearsalAudioRecorder(),
+      liveTranscriptionService: StubGroqTranscriptionService(),
+    ),
+    'rehearsal': () => RehearsalScreen(
+      internetConnectivity: _Online(),
+      enforceDeviceReadiness: false,
+      audioRecorder: SuccessfulRehearsalAudioRecorder(),
+      liveTranscriptionService: StubGroqTranscriptionService(),
+    ),
     'analyzing': () => const AnalyzingScreen(
       transcriptionErrorMessage:
           'Transcript unavailable. Check your internet connection and try again.',
@@ -97,6 +109,7 @@ void main() {
                   analysisDuration: const Duration(days: 1),
                   deviceCheckDuration: Duration.zero,
                   internetConnectivity: _Online(),
+                  enforceDeviceReadiness: false,
                   child: MaterialApp(
                     theme: buildAppTheme().copyWith(
                       platform: device.key.contains('iP')
@@ -163,7 +176,7 @@ void main() {
                 final meter = find.byWidgetPredicate(
                   (widget) =>
                       widget is Semantics &&
-                      widget.properties.label == 'Microphone inactive',
+                      widget.properties.label == 'Microphone active',
                 );
                 expect(
                   tester.getRect(frame).contains(tester.getCenter(meter)),

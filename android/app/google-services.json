@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "162455359845",
+    "project_id": "speaksync-5c956",
+    "storage_bucket": "speaksync-5c956.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:162455359845:android:26a03d82d10122e6d2118c",
+        "android_client_info": {
+          "package_name": "com.speaksync.speaksync_prototype"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAEcc8nDHW4kl75bvTfxac90CT-pkpLrKc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

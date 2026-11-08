@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
-import 'widgets/common_widgets.dart';
 
 import 'auth_service.dart';
+import 'screens/email_verification_screen.dart';
+import 'state/app_state.dart';
+import 'widgets/common_widgets.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -33,7 +35,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
-  void _submitRegistration() async {
+  Future<void> _submitRegistration() async {
     if (!_formKey.currentState!.validate()) return;
 
     final firstName = _firstNameController.text.trim();
@@ -48,34 +50,62 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
+    final auth = AuthServiceScope.of(context);
+    final appState = AppStateScope.of(context, listen: false);
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(seconds: 2));
+    try {
+      final displayName = [
+        firstName,
+        if (middleName.isNotEmpty) middleName,
+        lastName,
+      ].join(' ');
+      final user = await auth.register(
+        email: email,
+        password: password,
+        displayName: displayName,
+      );
 
-    final errorMessage = AuthService.registerUser(
-      firstName,
-      middleName.isEmpty ? null : middleName,
-      lastName,
-      email,
-      password,
-    );
-    if (!mounted) return;
+      String? warning;
+      try {
+        await appState.activateAuthenticatedUser(
+          userId: user.uid,
+          email: user.email,
+          displayName: displayName,
+          firstName: firstName,
+          middleName: middleName.isEmpty ? null : middleName,
+          lastName: lastName,
+        );
+      } catch (_) {
+        warning =
+            'Your Firebase account was created, but the local profile could not be prepared. Retry after verifying your email.';
+      }
 
-    setState(() => _isLoading = false);
-
-    if (errorMessage != null) {
-      _showErrorSnackBar(errorMessage);
-      return;
+      try {
+        await auth.sendEmailVerification();
+      } on AuthFailure catch (error) {
+        warning = error.message;
+      } catch (_) {
+        warning =
+            'Your account was created, but the verification email could not be sent. Use Resend Email on the next screen.';
+      }
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute<void>(
+          builder: (_) => EmailVerificationScreen(initialMessage: warning),
+        ),
+        (route) => false,
+      );
+    } on AuthFailure catch (error) {
+      if (mounted) _showErrorSnackBar(error.message);
+    } catch (_) {
+      if (mounted) {
+        _showErrorSnackBar(
+          'Unable to create the account right now. Check your connection and try again.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Account registered successfully. Please sign in.'),
-        backgroundColor: Colors.green,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-
-    Navigator.of(context).pop();
   }
 
   void _showErrorSnackBar(String message) {
@@ -137,13 +167,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Use your SHS email to register and start rehearsing.',
+                        'Use your email address to register and start rehearsing.',
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Color(0xFF9EB1C7)),
                       ),
                       const SizedBox(height: 48),
 
                       TextFormField(
+                        key: const Key('register_first_name'),
                         controller: _firstNameController,
                         style: const TextStyle(color: Colors.white),
                         decoration: InputDecoration(
@@ -177,6 +208,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
+                        key: const Key('register_middle_name'),
                         controller: _middleNameController,
                         style: const TextStyle(color: Colors.white),
                         decoration: InputDecoration(
@@ -204,6 +236,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
+                        key: const Key('register_last_name'),
                         controller: _lastNameController,
                         style: const TextStyle(color: Colors.white),
                         decoration: InputDecoration(
@@ -238,11 +271,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       const SizedBox(height: 16),
 
                       TextFormField(
+                        key: const Key('register_email'),
                         controller: _emailController,
                         keyboardType: TextInputType.emailAddress,
                         style: const TextStyle(color: Colors.white),
                         decoration: InputDecoration(
-                          labelText: 'SHS Email Address',
+                          labelText: 'Email Address',
                           labelStyle: const TextStyle(color: Color(0xFF9EB1C7)),
                           prefixIcon: const Icon(
                             Icons.email_outlined,
@@ -267,7 +301,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           if (value == null || value.trim().isEmpty) {
                             return 'Please enter your email address.';
                           }
-                          if (!value.contains('@') || !value.contains('.')) {
+                          if (!AuthService.isValidEmail(value)) {
                             return 'Please enter a valid email address.';
                           }
                           return null;
@@ -276,6 +310,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       const SizedBox(height: 16),
 
                       TextFormField(
+                        key: const Key('register_password'),
                         controller: _passwordController,
                         obscureText: _isPasswordHidden,
                         style: const TextStyle(color: Colors.white),
@@ -327,6 +362,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       const SizedBox(height: 16),
 
                       TextFormField(
+                        key: const Key('register_confirm_password'),
                         controller: _confirmPasswordController,
                         obscureText: _isPasswordHidden,
                         style: const TextStyle(color: Colors.white),

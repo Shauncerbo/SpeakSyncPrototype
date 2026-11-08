@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../auth_service.dart';
 import '../core/app_theme.dart';
 import '../models/app_preferences.dart';
 import '../state/app_state.dart';
 import '../widgets/common_widgets.dart';
-import '../login.dart';
+import '../widgets/app_tutorial.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -175,16 +176,28 @@ class SettingsScreen extends StatelessWidget {
       ),
     );
     if (confirmed != true || !context.mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
-      (route) => false,
-    );
+    try {
+      await AuthServiceScope.of(context).signOut();
+      if (!context.mounted) return;
+      AppStateScope.of(context, listen: false).clearAuthenticatedUser();
+      Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+    } on AuthFailure catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to log out. Please try again.')),
+      );
+    }
   }
 
-  Future<void> _help(BuildContext context) {
+  Future<void> _help(BuildContext pageContext) {
     return showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
+      context: pageContext,
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Help and Instructions'),
         content: const SingleChildScrollView(
           child: Text(
@@ -196,8 +209,17 @@ class SettingsScreen extends StatelessWidget {
           ),
         ),
         actions: [
+          TextButton.icon(
+            key: const Key('open_speaksync_tutorial'),
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              showSpeakSyncTutorial(pageContext);
+            },
+            icon: const Icon(Icons.info_outline_rounded),
+            label: const Text('Open Tutorial'),
+          ),
           FilledButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('Close'),
           ),
         ],
@@ -207,7 +229,8 @@ class SettingsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final preferences = AppStateScope.of(context).preferences;
+    final state = AppStateScope.of(context);
+    final preferences = state.preferences;
     return SafeArea(
       child: SingleChildScrollView(
         child: PageFrame(
@@ -365,7 +388,7 @@ class SettingsScreen extends StatelessWidget {
                       leading: const Icon(Icons.storage_outlined),
                       title: const Text('Saved rehearsal data'),
                       subtitle: Text(
-                        '${AppStateScope.of(context).sessions.length} sessions stored in this prototype',
+                        '${state.sessions.length} sessions stored for this account on this device',
                       ),
                       trailing: const Icon(Icons.chevron_right_rounded),
                       onTap: () => _savedData(context),
@@ -405,30 +428,32 @@ class SettingsScreen extends StatelessWidget {
               Card(
                 child: Column(
                   children: [
-                    ListTile(
-                      leading: const Icon(
-                        Icons.restore_rounded,
-                        color: primaryBlue,
+                    if (state.isDemoUser) ...[
+                      ListTile(
+                        leading: const Icon(
+                          Icons.restore_rounded,
+                          color: primaryBlue,
+                        ),
+                        title: const Text('Restore Demo Sessions'),
+                        subtitle: const Text(
+                          'Bring back the four sample rehearsals',
+                        ),
+                        onTap: () => _restoreDemoData(context),
                       ),
-                      title: const Text('Restore Demo Sessions'),
-                      subtitle: const Text(
-                        'Bring back the four sample rehearsals',
+                      const Divider(height: 1, indent: 16, endIndent: 16),
+                      ListTile(
+                        leading: const Icon(
+                          Icons.delete_sweep_outlined,
+                          color: errorRed,
+                        ),
+                        title: const Text(
+                          'Clear Prototype Data',
+                          style: TextStyle(color: errorRed),
+                        ),
+                        onTap: () => _reset(context),
                       ),
-                      onTap: () => _restoreDemoData(context),
-                    ),
-                    const Divider(height: 1, indent: 16, endIndent: 16),
-                    ListTile(
-                      leading: const Icon(
-                        Icons.delete_sweep_outlined,
-                        color: errorRed,
-                      ),
-                      title: const Text(
-                        'Clear Prototype Data',
-                        style: TextStyle(color: errorRed),
-                      ),
-                      onTap: () => _reset(context),
-                    ),
-                    const Divider(height: 1, indent: 16, endIndent: 16),
+                      const Divider(height: 1, indent: 16, endIndent: 16),
+                    ],
                     ListTile(
                       leading: const Icon(
                         Icons.logout_rounded,

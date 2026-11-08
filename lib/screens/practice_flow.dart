@@ -522,9 +522,16 @@ class _DropdownField extends StatelessWidget {
 }
 
 class DeviceCheckScreen extends StatefulWidget {
-  const DeviceCheckScreen({super.key, this.returnToPreview = false});
+  const DeviceCheckScreen({
+    super.key,
+    this.returnToPreview = false,
+    this.cameraAvailabilityCheck,
+    this.microphoneAvailabilityCheck,
+  });
 
   final bool returnToPreview;
+  final Future<bool> Function()? cameraAvailabilityCheck;
+  final Future<bool> Function()? microphoneAvailabilityCheck;
 
   @override
   State<DeviceCheckScreen> createState() => _DeviceCheckScreenState();
@@ -538,13 +545,20 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
   AppLifecycleListener? _lifecycleListener;
   bool? _internetAvailable;
   bool _connectivityInitialized = false;
+  bool _enforceDeviceReadiness = true;
+  bool? _cameraAvailable;
+  bool? _microphoneAvailable;
+  String _cameraCheckStatus = 'Waiting';
+  String _microphoneCheckStatus = 'Waiting';
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_connectivityInitialized) return;
     _connectivityInitialized = true;
-    _internetConnectivity = AppTimingScope.of(context).internetConnectivity;
+    final timing = AppTimingScope.of(context);
+    _internetConnectivity = timing.internetConnectivity;
+    _enforceDeviceReadiness = timing.enforceDeviceReadiness;
     _lifecycleListener = AppLifecycleListener(
       onResume: _resumeInternetMonitoring,
       onPause: _pauseInternetMonitoring,
@@ -583,14 +597,32 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
     setState(() {
       _checking = true;
       _activeCheck = 0;
+      _cameraAvailable = null;
+      _microphoneAvailable = null;
+      _cameraCheckStatus = 'Checking...';
+      _microphoneCheckStatus = 'Waiting';
     });
     final stepDuration = AppTimingScope.of(context).deviceCheckDuration;
-    for (var index = 0; index < 2; index++) {
-      if (!mounted) return;
-      setState(() => _activeCheck = index);
-      await Future<void>.delayed(stepDuration);
-      if (!mounted) return;
-    }
+    final cameraResult = _enforceDeviceReadiness
+        ? await _checkCameraAvailability()
+        : (available: true, status: 'Ready');
+    await Future<void>.delayed(stepDuration);
+    if (!mounted) return;
+    setState(() {
+      _cameraAvailable = cameraResult.available;
+      _cameraCheckStatus = cameraResult.status;
+      _activeCheck = 1;
+      _microphoneCheckStatus = 'Checking...';
+    });
+    final microphoneResult = _enforceDeviceReadiness
+        ? await _checkMicrophoneAvailability()
+        : (available: true, status: 'Ready');
+    await Future<void>.delayed(stepDuration);
+    if (!mounted) return;
+    setState(() {
+      _microphoneAvailable = microphoneResult.available;
+      _microphoneCheckStatus = microphoneResult.status;
+    });
     setState(() => _activeCheck = 2);
     final available = await _checkInternet();
     await Future<void>.delayed(stepDuration);
@@ -600,6 +632,58 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
       _checking = false;
       _activeCheck = -1;
     });
+  }
+
+  Future<({bool available, String status})> _checkCameraAvailability() async {
+    try {
+      final injected = widget.cameraAvailabilityCheck;
+      if (injected != null) {
+        final available = await injected();
+        return (
+          available: available,
+          status: available ? 'Ready' : 'Camera unavailable',
+        );
+      }
+      final permission = await Permission.camera.request();
+      if (!permission.isGranted) {
+        return (available: false, status: 'Permission needed');
+      }
+      final cameras = await availableCameras();
+      return cameras.isEmpty
+          ? (available: false, status: 'Camera unavailable')
+          : (available: true, status: 'Ready');
+    } catch (_) {
+      return (available: false, status: 'Camera unavailable');
+    }
+  }
+
+  Future<({bool available, String status})>
+  _checkMicrophoneAvailability() async {
+    try {
+      final injected = widget.microphoneAvailabilityCheck;
+      if (injected != null) {
+        final available = await injected();
+        return (
+          available: available,
+          status: available ? 'Ready' : 'Microphone unavailable',
+        );
+      }
+      final service = AmbientNoiseService(
+        config: const AmbientNoiseConfig(
+          sampleDuration: Duration(milliseconds: 900),
+        ),
+      );
+      try {
+        final result = await service.check();
+        return result.level == null
+            ? (available: false, status: 'Microphone unavailable')
+            : (available: true, status: 'Ready');
+      } finally {
+        await service.dispose();
+      }
+    } catch (_) {
+      return (available: false, status: 'Microphone unavailable');
+    }
   }
 
   Future<bool> _checkInternet() async {
@@ -619,12 +703,6 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
   void _handleInternetStatus(bool available) {
     if (!mounted || _internetAvailable == available) return;
     setState(() => _internetAvailable = available);
-  }
-
-  String _checkStatus(int index, String readyStatus) {
-    if (_checking && _activeCheck == index) return 'Checking...';
-    if (_checking && _activeCheck < index) return 'Waiting';
-    return readyStatus;
   }
 
   String get _internetStatus {
@@ -671,7 +749,7 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
                 const SizedBox(height: 7),
                 Text(
                   setup == null
-                      ? 'Review the simulated device checks below.'
+                      ? 'Review the device checks below.'
                       : 'Device check for “${setup.speechTitle}”',
                   style: const TextStyle(
                     color: Color(0xFF617085),
@@ -683,17 +761,19 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
                 StatusCard(
                   icon: Icons.videocam_outlined,
                   title: 'Camera',
-                  status: _checkStatus(0, 'Ready'),
+                  status: _cameraCheckStatus,
                   isChecking: _checking && _activeCheck == 0,
-                  isPending: _checking && _activeCheck < 0,
+                  isPending: _cameraAvailable == null && _activeCheck != 0,
+                  isSuccessful: _cameraAvailable != false,
                 ),
                 const SizedBox(height: 10),
                 StatusCard(
                   icon: Icons.mic_none_rounded,
                   title: 'Microphone',
-                  status: _checkStatus(1, 'Ready'),
+                  status: _microphoneCheckStatus,
                   isChecking: _checking && _activeCheck == 1,
-                  isPending: _checking && _activeCheck < 1,
+                  isPending: _microphoneAvailable == null && _activeCheck != 1,
+                  isSuccessful: _microphoneAvailable != false,
                 ),
                 const SizedBox(height: 10),
                 StatusCard(
@@ -708,6 +788,30 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
                   isPending: _checking && _activeCheck < 2,
                   isSuccessful: _internetAvailable != false,
                 ),
+                if (_cameraAvailable == false ||
+                    _microphoneAvailable == false) ...[
+                  const SizedBox(height: 12),
+                  InfoBanner(
+                    icon: Icons.warning_amber_rounded,
+                    title: 'Device attention needed',
+                    message: [
+                      if (_cameraAvailable == false)
+                        'Camera not detected or unavailable. Allow Camera access in Android Settings, then retry.',
+                      if (_microphoneAvailable == false)
+                        'Microphone unavailable. Allow Microphone access, close other recording apps, then retry.',
+                    ].join(' '),
+                    color: errorRed,
+                  ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      key: const Key('open_device_permissions'),
+                      onPressed: openAppSettings,
+                      icon: const Icon(Icons.settings_outlined),
+                      label: const Text('Open App Settings'),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 24),
                 const SectionHeader('Before you begin'),
                 const SizedBox(height: 12),
@@ -749,17 +853,28 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
                 FilledButton.icon(
                   key: const Key('start_rehearsal'),
                   onPressed:
-                      setup == null || _checking || _internetAvailable != true
+                      setup == null ||
+                          _checking ||
+                          _internetAvailable != true ||
+                          _cameraAvailable != true ||
+                          _microphoneAvailable != true
                       ? null
                       : () {
                           if (widget.returnToPreview) {
                             Navigator.of(context).pop();
                             return;
                           }
+                          final timing = AppTimingScope.of(context);
                           Navigator.of(context).push(
                             MaterialPageRoute<void>(
                               builder: (_) => RehearsalScreen(
                                 internetConnectivity: _internetConnectivity,
+                                enforceDeviceReadiness: _enforceDeviceReadiness,
+                                audioRecorder: timing
+                                    .rehearsalAudioRecorderFactory
+                                    ?.call(),
+                                liveTranscriptionService:
+                                    timing.liveTranscriptionService,
                               ),
                             ),
                           );
@@ -844,6 +959,11 @@ class _ReadinessCard extends StatelessWidget {
     required this.onDeviceCheck,
     required this.noiseChecking,
     required this.noiseResult,
+    required this.enforceDeviceReadiness,
+    required this.cameraReady,
+    required this.cameraStatus,
+    required this.onRetryCamera,
+    required this.onOpenSettings,
   });
 
   final bool busy;
@@ -852,6 +972,16 @@ class _ReadinessCard extends StatelessWidget {
   final VoidCallback onDeviceCheck;
   final bool noiseChecking;
   final AmbientNoiseResult? noiseResult;
+  final bool enforceDeviceReadiness;
+  final bool cameraReady;
+  final String cameraStatus;
+  final VoidCallback onRetryCamera;
+  final VoidCallback onOpenSettings;
+
+  bool get _microphoneReady => noiseResult?.level != null;
+
+  bool get _devicesReady =>
+      !enforceDeviceReadiness || (cameraReady && _microphoneReady);
 
   @override
   Widget build(BuildContext context) {
@@ -887,10 +1017,42 @@ class _ReadinessCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           _AmbientNoiseStatus(checking: noiseChecking, result: noiseResult),
+          if (enforceDeviceReadiness && !cameraReady) ...[
+            const SizedBox(height: 12),
+            _ReadinessIssue(
+              key: const Key('camera_unavailable_notice'),
+              icon: Icons.videocam_off_outlined,
+              message: cameraStatus,
+              actionLabel: 'Retry Camera',
+              onAction: busy ? null : onRetryCamera,
+            ),
+          ],
+          if (enforceDeviceReadiness && !_microphoneReady) ...[
+            const SizedBox(height: 10),
+            _ReadinessIssue(
+              key: const Key('microphone_unavailable_notice'),
+              icon: Icons.mic_off_outlined,
+              message:
+                  'Microphone unavailable. Allow microphone access and close other recording apps, then wait for the automatic check.',
+            ),
+          ],
+          if (enforceDeviceReadiness && !_devicesReady)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                key: const Key('preview_open_permissions'),
+                onPressed: onOpenSettings,
+                icon: const Icon(Icons.settings_outlined),
+                label: const Text('Permission instructions'),
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFFBDD0E2),
+                ),
+              ),
+            ),
           const SizedBox(height: 16),
           FilledButton.icon(
             key: const Key('ready_rehearsal'),
-            onPressed: busy ? null : onReady,
+            onPressed: busy || !_devicesReady ? null : onReady,
             style: FilledButton.styleFrom(
               backgroundColor: accentTeal,
               foregroundColor: navy,
@@ -909,6 +1071,51 @@ class _ReadinessCard extends StatelessWidget {
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReadinessIssue extends StatelessWidget {
+  const _ReadinessIssue({
+    super.key,
+    required this.icon,
+    required this.message,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  final IconData icon;
+  final String message;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: errorRed.withValues(alpha: .13),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: errorRed.withValues(alpha: .45)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: const Color(0xFFFF9A94), size: 21),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(color: Color(0xFFF2F6FA), height: 1.35),
+            ),
+          ),
+          if (actionLabel != null) ...[
+            const SizedBox(width: 6),
+            TextButton(onPressed: onAction, child: Text(actionLabel!)),
+          ],
         ],
       ),
     );
@@ -988,6 +1195,7 @@ class RehearsalScreen extends StatefulWidget {
     this.postureLandmarker,
     this.postureThresholds = const PostureThresholds(),
     this.posturePerformanceConfig = const PosturePerformanceConfig(),
+    this.enforceDeviceReadiness = true,
   });
 
   final InternetConnectivity? internetConnectivity;
@@ -999,6 +1207,7 @@ class RehearsalScreen extends StatefulWidget {
   final PostureLandmarker? postureLandmarker;
   final PostureThresholds postureThresholds;
   final PosturePerformanceConfig posturePerformanceConfig;
+  final bool enforceDeviceReadiness;
   final LiveFillerFeedbackService Function(
     GroqTranscriptionService,
     void Function(String)?,
@@ -1240,6 +1449,22 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     if (_hasStarted || _starting || _checkingReadiness || _countdown != null) {
       return;
     }
+    if (widget.enforceDeviceReadiness && !_cameraReady) {
+      _showAlert(
+        'Camera not detected or unavailable. Check permission, then retry.',
+        errorRed,
+        icon: Icons.videocam_off_outlined,
+      );
+      return;
+    }
+    if (widget.enforceDeviceReadiness && _noiseResult?.level == null) {
+      _showAlert(
+        'Microphone unavailable. Check permission or close other recording apps.',
+        errorRed,
+        icon: Icons.mic_off_outlined,
+      );
+      return;
+    }
     final generation = ++_readinessGeneration;
     setState(() => _checkingReadiness = true);
     await _stopAmbientNoise();
@@ -1311,6 +1536,15 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   Future<void> _startAfterCountdown() async {
     await _startAudioRecording();
     if (!mounted || _leaving) return;
+    if (!_audioRecorder.hasStarted) {
+      setState(() {
+        _starting = false;
+        _recording = false;
+        _hasStarted = false;
+      });
+      unawaited(_resumeAmbientNoise());
+      return;
+    }
     _resetPostureSession();
     _postureClock
       ..reset()
@@ -1364,8 +1598,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   }
 
   Future<void> _startAudioRecording() async {
-    await _levelSubscription?.cancel();
-    _levelSubscription = null;
+    await _cancelMicrophoneLevelUpdates();
     if (!mounted || _leaving) return;
     _microphoneLevel.value = 0;
     // An injected transcriber is used by deterministic widget tests. Normal
@@ -1377,6 +1610,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
         _recording = false;
         _audioRecordingError = message;
       });
+      _showAlert(message, errorRed, icon: Icons.cloud_off_outlined);
       return;
     }
     try {
@@ -1420,6 +1654,18 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
         _audioRecordingError = message;
       });
       _showAlert(message, errorRed, icon: Icons.mic_off_rounded);
+    }
+  }
+
+  Future<void> _cancelMicrophoneLevelUpdates() async {
+    final subscription = _levelSubscription;
+    _levelSubscription = null;
+    if (subscription == null) return;
+    try {
+      await subscription.cancel().timeout(const Duration(seconds: 1));
+    } catch (_) {
+      // Some OEM recorder amplitude streams do not acknowledge cancellation.
+      // Recording cleanup and restart must continue without that optional UI.
     }
   }
 
@@ -1590,13 +1836,20 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   }
 
   Future<void> _prepareCamera() async {
+    if (mounted && !_leaving) {
+      setState(() {
+        _cameraReady = false;
+        _cameraStatus = 'Checking camera access...';
+      });
+    }
     try {
       final cameraStatus = await Permission.camera.request();
       if (!mounted || _leaving) return;
       if (!cameraStatus.isGranted) {
         setState(() {
           _cameraReady = false;
-          _cameraStatus = 'Allow camera access to check your framing.';
+          _cameraStatus =
+              'Camera not detected or unavailable. Allow camera access in Android Settings, then retry.';
         });
         return;
       }
@@ -1605,7 +1858,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       if (cameras.isEmpty) {
         setState(() {
           _cameraReady = false;
-          _cameraStatus = 'No camera found on this device.';
+          _cameraStatus = 'Camera not detected or unavailable.';
         });
         return;
       }
@@ -1644,14 +1897,29 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
         _cameraReady = true;
         _cameraStatus = 'Camera ready';
       });
-    } catch (e) {
-      debugPrint('Camera initialization error: $e');
+    } catch (_) {
       if (!mounted || _leaving) return;
       setState(() {
         _cameraReady = false;
-        _cameraStatus = 'Unable to initialize camera. Error: $e';
+        _cameraStatus =
+            'Camera not detected or unavailable. Close other camera apps, check permission, then retry.';
       });
     }
+  }
+
+  Future<void> _retryCamera() async {
+    if (_hasStarted || _starting || _leaving) return;
+    _cameraPreparationComplete = false;
+    final previous = _cameraController;
+    _cameraController = null;
+    if (previous != null) {
+      try {
+        await previous.dispose();
+      } catch (_) {}
+    }
+    await _prepareCamera();
+    _cameraPreparationComplete = true;
+    await _resumeAmbientNoise();
   }
 
   Future<void> _startPostureAnalysis() async {
@@ -2123,8 +2391,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       ..reset()
       ..start();
     _microphoneLevel.value = 0;
-    await _levelSubscription?.cancel();
-    _levelSubscription = null;
+    await _cancelMicrophoneLevelUpdates();
     await _audioRecorder.discard();
     await _stopLiveFillerFeedback();
     if (!mounted) return;
@@ -2143,6 +2410,16 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     });
     await _startAudioRecording();
     if (!mounted) return;
+    if (!_audioRecorder.hasStarted) {
+      _timer?.cancel();
+      _postureClock.stop();
+      setState(() {
+        _hasStarted = false;
+        _recording = false;
+      });
+      unawaited(_resumeAmbientNoise());
+      return;
+    }
     unawaited(_startPostureAnalysis());
     // Give the new attempt a full first second, independent of the old timer.
     _timer?.cancel();
@@ -2344,7 +2621,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       matchedScriptWords: comparison?.matchedReferenceWords,
       scriptComparisonStatus: comparison?.status,
       gestureCounts: Map.unmodifiable(_gestureCounts),
-      isPrototypeData: true,
+      isPrototypeData: false,
     );
     state.setCurrentReport(session);
     if (!mounted) return;
@@ -2568,6 +2845,11 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                           starting: _starting,
                           noiseChecking: _noiseChecking,
                           noiseResult: _noiseResult,
+                          enforceDeviceReadiness: widget.enforceDeviceReadiness,
+                          cameraReady: _cameraReady,
+                          cameraStatus: _cameraStatus,
+                          onRetryCamera: () => unawaited(_retryCamera()),
+                          onOpenSettings: () => unawaited(openAppSettings()),
                           onReady: _beginCountdown,
                           onDeviceCheck: () async {
                             final generation = ++_readinessGeneration;

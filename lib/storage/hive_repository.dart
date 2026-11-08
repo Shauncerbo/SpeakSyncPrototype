@@ -579,7 +579,7 @@ class HiveRepository {
       recommendedPosture: session.bodyLanguageEnabled
           ? practiceSession.postureCoachingRecommendation
           : 'Upper-body monitoring was off for this rehearsal.',
-      isPrototypeData: true,
+      isPrototypeData: practiceSession.isPrototypeData,
       referenceScript: hasReferenceScript ? referenceScript : null,
       referenceDocumentName:
           practiceSession.referenceDocumentName ??

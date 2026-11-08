@@ -3,9 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../app.dart';
+import '../auth_service.dart';
 import '../core/app_theme.dart';
 import '../login.dart';
 import '../widgets/common_widgets.dart';
+import 'authenticated_home.dart';
+import 'email_verification_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -22,9 +25,18 @@ class _SplashScreenState extends State<SplashScreen> {
     super.didChangeDependencies();
     _timer ??= Timer(AppTimingScope.of(context).splashDuration, () {
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(builder: (_) => const OnboardingScreen()),
-      );
+      final user = AuthServiceScope.of(context).currentUser;
+      final Widget destination;
+      if (user == null) {
+        destination = const OnboardingScreen();
+      } else if (user.emailVerified) {
+        destination = const AuthenticatedHome();
+      } else {
+        destination = const EmailVerificationScreen();
+      }
+      Navigator.of(
+        context,
+      ).pushReplacement(MaterialPageRoute<void>(builder: (_) => destination));
     });
   }
 
