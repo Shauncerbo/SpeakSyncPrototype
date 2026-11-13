@@ -30,6 +30,7 @@ class AppState extends ChangeNotifier {
   String? _activeUserId;
   User? _currentUserProfile;
   bool _isLoading;
+  bool _tutorialCompleted = true;
   String? _storageError;
   PracticeSettings? currentSetup;
   PracticeSession? currentReport;
@@ -42,6 +43,8 @@ class AppState extends ChangeNotifier {
   bool get hasAuthenticatedUser =>
       _activeUserId != null && _activeUserId != AppUserIds.demo;
   bool get isLoading => _isLoading;
+  bool get shouldShowFirstLoginTutorial =>
+      hasAuthenticatedUser && !_tutorialCompleted;
   String? get storageError => _storageError;
 
   Future<void> initialize() async {
@@ -118,6 +121,7 @@ class AppState extends ChangeNotifier {
     currentSetup = null;
     currentReport = null;
     _preferences = initialPreferences.copyWith(userId: normalizedUserId);
+    _tutorialCompleted = true;
     _isLoading = true;
     notifyListeners();
 
@@ -163,6 +167,7 @@ class AppState extends ChangeNotifier {
       _currentUserProfile = profile;
       _preferences = userPreferences;
       _sessions = repository.getPracticeSessions(normalizedUserId);
+      _tutorialCompleted = repository.hasCompletedTutorial(normalizedUserId);
       _storageError = null;
     } catch (error) {
       _sessions = [];
@@ -179,10 +184,24 @@ class AppState extends ChangeNotifier {
     _currentUserProfile = null;
     _sessions = [];
     _preferences = initialPreferences;
+    _tutorialCompleted = true;
     currentSetup = null;
     currentReport = null;
     _isLoading = false;
     notifyListeners();
+  }
+
+  Future<void> markFirstLoginTutorialCompleted() async {
+    final userId = _activeUserId;
+    if (userId == null || userId == AppUserIds.demo) return;
+    _tutorialCompleted = true;
+    notifyListeners();
+    try {
+      await _repository?.markTutorialCompleted(userId);
+    } catch (error) {
+      _storageError = error.toString();
+      notifyListeners();
+    }
   }
 
   static ({String firstName, String? middleName, String lastName})

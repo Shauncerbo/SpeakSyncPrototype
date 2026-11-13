@@ -2,15 +2,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:speaksync_prototype/services/posture_performance.dart';
 
 void main() {
-  test('pose gate throttles results to two FPS by default', () {
-    final gate = PoseFrameGate(
-      minimumInterval: const PosturePerformanceConfig().analysisInterval,
-    );
+  test('pose gate targets about 3.3 FPS by default', () {
+    const config = PosturePerformanceConfig();
+    expect(config.analysisInterval, const Duration(milliseconds: 300));
+    expect(config.maximumInferenceDimension, 320);
+
+    final gate = PoseFrameGate(minimumInterval: config.analysisInterval);
 
     expect(gate.tryAcquire(Duration.zero), isTrue);
     gate.complete();
-    expect(gate.tryAcquire(const Duration(milliseconds: 300)), isFalse);
-    expect(gate.tryAcquire(const Duration(milliseconds: 500)), isTrue);
+    expect(gate.tryAcquire(const Duration(milliseconds: 299)), isFalse);
+    expect(gate.tryAcquire(const Duration(milliseconds: 300)), isTrue);
     gate.complete();
     expect(gate.skippedFrames, 1);
   });

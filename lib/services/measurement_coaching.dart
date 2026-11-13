@@ -18,57 +18,60 @@ class MeasurementCoaching {
     bool monitorFacing = true,
     bool demo = false,
   }) {
-    if (demo) {
-      return const [
-        'Example rehearsal: complete your own session to receive measured coaching.',
-      ];
-    }
+    if (demo) return const [];
     final tips = <String>[];
     if (monitorPace) {
       final wpm = pace.wordsPerMinute;
-      tips.add(
-        wpm == null
-            ? 'Speaking pace: unavailable. A recognized final transcript and a positive rehearsal duration are needed.'
-            : 'Speaking pace: ${wpm.toStringAsFixed(1)} WPM (${pace.classification}). ${wpm < 120
-                  ? 'Try a steadier speaking rhythm. Practise one sentence at a time, keeping pauses between ideas.'
-                  : wpm > 160
-                  ? 'Slow down slightly and pause between key ideas so listeners can follow.'
-                  : 'Your pace is in the 120–160 WPM target range. Keep this rhythm and use pauses between ideas.'}',
-      );
-    }
-    if (monitorFillers) {
-      if (!fillers.hasTranscript) {
+      if (wpm != null && wpm < 120) {
         tips.add(
-          'Filler words: unavailable because the final transcript has no recognized words. This does not mean no fillers were spoken.',
+          'Speaking pace: ${wpm.toStringAsFixed(1)} WPM (${pace.classification}). '
+          'Try a steadier speaking rhythm. Practise one sentence at a time, '
+          'keeping pauses between ideas.',
         );
-      } else {
-        final rate = fillers.perMinute;
-        final matches = fillers.counts.entries.toList()
-          ..sort((a, b) {
-            final count = b.value.compareTo(a.value);
-            return count == 0 ? a.key.compareTo(b.key) : count;
-          });
-        final common = matches
-            .take(3)
-            .map((entry) => '${entry.key} (${entry.value})')
-            .join(', ');
-        final advice = rate == null
-            ? 'Frequency is unavailable without a positive rehearsal duration.'
-            : rate < 2
-            ? 'Few dictionary matches were found per minute. Keep using intentional pauses.'
-            : rate < 6
-            ? 'The frequency is low/acceptable under the current criteria. Try a short pause before your next idea.'
-            : rate < 12
-            ? 'The frequency is elevated. Rehearse short sections and replace unnecessary fillers with a calm pause.'
-            : 'The frequency is high. Practise a short section slowly, pause to plan the next idea, then try it again.';
+      } else if (wpm != null && wpm > 160) {
         tips.add(
-          'Filler words: ${fillers.total} detected dictionary matches in the final transcript${rate == null ? '' : ', ${rate.toStringAsFixed(1)} per minute (${fillers.classification})'}. $advice${common.isEmpty ? '' : ' Most frequent expressions: $common.'} These words can be meaningful in context; review whether each use was unnecessary before treating it as a hesitation.',
+          'Speaking pace: ${wpm.toStringAsFixed(1)} WPM (${pace.classification}). '
+          'Slow down slightly and pause between key ideas so listeners can follow.',
         );
       }
     }
+    if (monitorFillers && fillers.hasTranscript && fillers.total > 0) {
+      final rate = fillers.perMinute;
+      final matches = fillers.counts.entries.toList()
+        ..sort((a, b) {
+          final count = b.value.compareTo(a.value);
+          return count == 0 ? a.key.compareTo(b.key) : count;
+        });
+      final common = matches
+          .take(3)
+          .map((entry) => '${entry.key} (${entry.value})')
+          .join(', ');
+      final advice = rate == null
+          ? 'Frequency is unavailable without a positive rehearsal duration.'
+          : rate < 2
+          ? 'Few dictionary matches were found per minute. Keep using intentional pauses.'
+          : rate < 6
+          ? 'The frequency is low/acceptable under the current criteria. Try a short pause before your next idea.'
+          : rate < 12
+          ? 'The frequency is elevated. Rehearse short sections and replace unnecessary fillers with a calm pause.'
+          : 'The frequency is high. Practise a short section slowly, pause to plan the next idea, then try it again.';
+      tips.add(
+        'Filler words: ${fillers.total} detected dictionary matches in the final transcript${rate == null ? '' : ', ${rate.toStringAsFixed(1)} per minute (${fillers.classification})'}. $advice${common.isEmpty ? '' : ' Most frequent expressions: $common.'} These words can be meaningful in context; review whether each use was unnecessary before treating it as a hesitation.',
+      );
+    }
     if (monitorPosture) {
-      tips.add(posture(posturePercentage, validPostureSeconds));
-      tips.add(framing(framingMilliseconds));
+      final postureAvailable =
+          posturePercentage != null &&
+          posturePercentage >= 0 &&
+          posturePercentage <= 100 &&
+          validPostureSeconds != null &&
+          validPostureSeconds >= 3;
+      if (postureAvailable && posturePercentage < 100) {
+        tips.add(posture(posturePercentage, validPostureSeconds));
+      }
+      if (_hasFramingIssue(framingMilliseconds)) {
+        tips.add(framing(framingMilliseconds));
+      }
     }
     if (monitorFacing) {
       final available =
@@ -77,18 +80,28 @@ class MeasurementCoaching {
           facingPercentage <= 100 &&
           validFaceMilliseconds != null &&
           validFaceMilliseconds >= 3000;
-      tips.add(
-        !available
-            ? 'Camera-facing attention: unavailable because valid face-analysis time is missing or insufficient. Missing faces are not poor performance.'
-            : 'Estimated camera-facing attention: $facingPercentage% of ${(validFaceMilliseconds / 1000).toStringAsFixed(1)} valid analysis seconds. ${facingPercentage < 100 ? 'Some valid face samples showed your head turned away. Try facing the camera more consistently while speaking.' : 'Your head generally faced the camera in the valid measured samples. Keep this head position while speaking.'} This estimates head direction, not eye contact or audience engagement.',
-      );
-    }
-    if (tips.isEmpty) {
-      tips.add(
-        'Monitoring was off for this rehearsal. No measurement-based performance recommendations are available.',
-      );
+      if (available && facingPercentage < 100) {
+        tips.add(
+          'Estimated camera-facing attention: $facingPercentage% of ${(validFaceMilliseconds / 1000).toStringAsFixed(1)} valid analysis seconds. '
+          'Some valid face samples showed your head turned away. Try facing the '
+          'camera more consistently while speaking. This estimates head '
+          'direction, not eye contact or audience engagement.',
+        );
+      }
     }
     return List.unmodifiable(tips);
+  }
+
+  static bool _hasFramingIssue(Map<String, int>? milliseconds) {
+    if (milliseconds == null ||
+        milliseconds.values.any((value) => value < 0) ||
+        milliseconds.keys.any(
+          (key) => !const {'tooClose', 'proper', 'tooFar'}.contains(key),
+        )) {
+      return false;
+    }
+    return (milliseconds['tooClose'] ?? 0) > 0 ||
+        (milliseconds['tooFar'] ?? 0) > 0;
   }
 
   static String posture(int? percentage, int? validSeconds) {

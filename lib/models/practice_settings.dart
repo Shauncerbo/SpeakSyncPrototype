@@ -11,6 +11,8 @@ class PracticeSettings {
     required this.monitorFillers,
     required this.monitorPace,
     required this.enableLiveFeedback,
+    this.fullBodyFraming = false,
+    this.showPoseSkeleton = false,
   });
 
   final String speechTitle;
@@ -24,4 +26,9 @@ class PracticeSettings {
   final bool monitorFillers;
   final bool monitorPace;
   final bool enableLiveFeedback;
+
+  /// Experimental visual guidance only. Existing posture measurements still
+  /// use the validated-in-code shoulder and hip inputs.
+  final bool fullBodyFraming;
+  final bool showPoseSkeleton;
 }

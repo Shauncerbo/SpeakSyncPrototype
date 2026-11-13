@@ -2,15 +2,18 @@ import 'dart:math' as math;
 
 class PosturePerformanceConfig {
   const PosturePerformanceConfig({
-    this.analysisInterval = const Duration(milliseconds: 500),
-    this.maximumInferenceDimension = 384,
+    this.analysisInterval = const Duration(milliseconds: 300),
+    this.maximumInferenceDimension = 320,
   });
 
   /// Posture is deliberately lower priority than preview/audio smoothness.
-  /// 500 ms means at most two pose requests per second.
+  /// 300 ms means at most about 3.3 pose requests per second. The frame gate
+  /// still allows only one request at a time and drops frames while native
+  /// inference is busy, so slower devices cannot build up a stale queue.
   final Duration analysisInterval;
 
-  /// YUV is converted directly into this aspect-ratio-preserving bound.
+  /// YUV is converted directly into this aspect-ratio-preserving bound. This
+  /// affects only MediaPipe input; the visible camera preview stays high-res.
   final int maximumInferenceDimension;
 }
 

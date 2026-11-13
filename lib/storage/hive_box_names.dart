@@ -13,6 +13,10 @@ abstract final class HiveBoxNames {
 abstract final class StorageMetadataKeys {
   static const demoDataSeeded = 'demoDataSeededV1';
   static const legacyUsersMigrated = 'legacyUsersMigratedV1';
+  static const tutorialCompletedPrefix = 'tutorialCompletedV1';
+
+  static String tutorialCompleted(String userId) =>
+      '$tutorialCompletedPrefix::$userId';
 }
 
 abstract final class AppUserIds {

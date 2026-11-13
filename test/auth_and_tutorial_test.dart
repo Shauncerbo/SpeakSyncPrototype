@@ -36,13 +36,43 @@ void main() {
     await tester.tap(find.text('Help and Instructions'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('open_speaksync_tutorial')));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.byKey(const Key('speaksync_tutorial')), findsOneWidget);
     expect(find.text('Start a rehearsal'), findsOneWidget);
+    expect(find.text('1 of 4'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('tutorial_next')));
+    await tester.pump(const Duration(milliseconds: 250));
     expect(find.text('Choose a speech type'), findsOneWidget);
+    expect(find.text('2 of 4'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('tutorial_next')));
+    await tester.pump(const Duration(milliseconds: 250));
     expect(find.text('Select monitoring'), findsOneWidget);
-    expect(find.text('Review your report'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('tutorial_next')));
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.text('Review your progress'), findsOneWidget);
+    expect(find.text('Finish'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('tutorial_next')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('speaksync_tutorial')), findsNothing);
+  });
+
+  testWidgets('tutorial can be deliberately skipped', (tester) async {
+    await tester.pumpWidget(
+      AppStateScope(
+        notifier: AppState(),
+        child: const MaterialApp(home: Scaffold(body: SettingsScreen())),
+      ),
+    );
+    await tester.ensureVisible(find.text('Help and Instructions'));
+    await tester.tap(find.text('Help and Instructions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('open_speaksync_tutorial')));
+    await tester.pump(const Duration(milliseconds: 300));
 
     await tester.tap(find.byKey(const Key('dismiss_speaksync_tutorial')));
     await tester.pumpAndSettle();

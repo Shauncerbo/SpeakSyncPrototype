@@ -60,12 +60,7 @@ PracticeSession session({
 );
 
 void main() {
-  for (final entry in {
-    119: 'Slow',
-    120: 'Target',
-    160: 'Target',
-    161: 'Fast',
-  }.entries) {
+  for (final entry in {119: 'Slow', 161: 'Fast'}.entries) {
     test(
       '${entry.key} final words per minute generates ${entry.value} coaching',
       () {
@@ -77,20 +72,41 @@ void main() {
       },
     );
   }
+
+  for (final words in [120, 160]) {
+    test('$words WPM in the target range needs no corrective pace tip', () {
+      final value = session(words: words);
+      expect(
+        value.measuredCoachingTips.any(
+          (tip) => tip.startsWith('Speaking pace:'),
+        ),
+        isFalse,
+      );
+    });
+  }
+
   test(
-    'pace uses final transcript and actual duration, not counters or scores',
+    'target pace uses final transcript without creating corrective coaching',
     () {
       final value = session(words: 280, duration: const Duration(minutes: 2));
       expect(value.speakingPace.wordsPerMinute, 140);
-      expect(value.measuredCoachingTips.first, contains('140.0 WPM'));
+      expect(value.measuredCoachingTips, isEmpty);
       expect(
         value.measuredCoachingTips.join(' '),
         isNot(contains('simulated')),
       );
     },
   );
+  test('zero detected fillers creates no filler coaching tip', () {
+    final value = session(transcript: 'we practice clearly today');
+    expect(value.fillerAnalysis.total, 0);
+    expect(
+      value.measuredCoachingTips.any((tip) => tip.startsWith('Filler words:')),
+      isFalse,
+    );
+  });
+
   for (final entry in {
-    0: 'Very Low',
     1: 'Very Low',
     2: 'Low / Acceptable',
     5: 'Low / Acceptable',
@@ -138,18 +154,92 @@ void main() {
         transcript: 'kuan we have words',
         duration: duration,
       );
-      expect(value.measuredCoachingTips.first, contains('unavailable'));
-      final filler = value.measuredCoachingTips[1];
+      expect(
+        value.measuredCoachingTips.any(
+          (tip) => tip.startsWith('Speaking pace:'),
+        ),
+        isFalse,
+      );
+      final filler = value.measuredCoachingTips.single;
       expect(filler, contains('1 detected dictionary matches'));
       expect(filler, contains('Frequency is unavailable'));
       expect(filler, isNot(contains('Very Low')));
     });
   }
-  test('missing transcript is unavailable, not perfect performance', () {
+  test('missing transcript creates no corrective speech coaching', () {
     final value = session(hasTranscript: false);
-    expect(value.measuredCoachingTips[0], contains('unavailable'));
-    expect(value.measuredCoachingTips[1], contains('unavailable'));
+    expect(value.measuredCoachingTips, isEmpty);
     expect(value.measuredCoachingTips.join(' '), isNot(contains('perfect')));
+  });
+
+  test('satisfactory measurements do not create corrective tips', () {
+    final value = session(
+      words: 140,
+      posture: 100,
+      validPose: 30,
+      attention: 100,
+      validFace: 10000,
+      framing: const {'proper': 10000},
+    );
+
+    expect(value.fillerAnalysis.total, 0);
+    expect(value.measuredCoachingTips, isEmpty);
+  });
+
+  test('each genuine measured issue creates only its relevant tip', () {
+    final value = session(
+      transcript: 'kuan one two three four five',
+      posture: 80,
+      validPose: 30,
+      attention: 75,
+      validFace: 10000,
+      framing: const {'proper': 8000, 'tooClose': 2000},
+    );
+    final tips = value.measuredCoachingTips;
+
+    expect(tips.where((tip) => tip.startsWith('Speaking pace:')), hasLength(1));
+    expect(tips.where((tip) => tip.startsWith('Filler words:')), hasLength(1));
+    expect(
+      tips.where((tip) => tip.startsWith('Upper-body posture:')),
+      hasLength(1),
+    );
+    expect(
+      tips.where((tip) => tip.startsWith('Camera framing:')),
+      hasLength(1),
+    );
+    expect(
+      tips.where((tip) => tip.startsWith('Estimated camera-facing')),
+      hasLength(1),
+    );
+  });
+
+  testWidgets('report handles an empty corrective-tip list safely', (
+    tester,
+  ) async {
+    final value = session(
+      words: 140,
+      posture: 100,
+      validPose: 30,
+      attention: 100,
+      validFace: 10000,
+      framing: const {'proper': 10000},
+    );
+    final state = AppState()..setCurrentReport(value);
+    await tester.pumpWidget(
+      AppStateScope(
+        notifier: state,
+        child: const MaterialApp(home: ReportScreen()),
+      ),
+    );
+
+    expect(find.text('No corrective tips'), findsOneWidget);
+    expect(
+      find.text(
+        'No corrective coaching tip was generated from the available measurements.',
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
   });
   test('measured zero posture receives advice, missing landmarks do not', () {
     expect(
@@ -213,11 +303,11 @@ void main() {
     expect(tip, contains('separate from head direction'));
     expect(
       session(framing: const {'proper': 1000}).measuredCoachingTips.join(' '),
-      contains('Camera framing: Proper'),
+      isNot(contains('Camera framing:')),
     );
     expect(
       session(framing: const {}).measuredCoachingTips.join(' '),
-      contains('Camera framing: unavailable'),
+      isNot(contains('Camera framing:')),
     );
   });
   test(
@@ -231,7 +321,7 @@ void main() {
         validFace: 10000,
         framing: const {'tooClose': 3000},
       );
-      expect(value.measuredCoachingTips.single, contains('Monitoring was off'));
+      expect(value.measuredCoachingTips, isEmpty);
       expect(value.measuredPosturePercentage, isNull);
       expect(value.measuredAttentionPercentage, isNull);
       expect(
@@ -240,8 +330,8 @@ void main() {
           words: 161,
           posture: 0,
           validPose: 50,
-        ).measuredCoachingTips.single,
-        contains('Example rehearsal'),
+        ).measuredCoachingTips,
+        isEmpty,
       );
     },
   );

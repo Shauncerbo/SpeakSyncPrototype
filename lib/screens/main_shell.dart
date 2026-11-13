@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/app_theme.dart';
 import '../state/app_state.dart';
+import '../widgets/app_tutorial.dart';
 import 'home_screen.dart';
 import 'practice_flow.dart';
 import 'progress_screens.dart';
@@ -17,6 +18,8 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   late int _index;
+  bool _tutorialScheduled = false;
+  bool _tutorialVisible = false;
 
   @override
   void initState() {
@@ -28,9 +31,28 @@ class _MainShellState extends State<MainShell> {
     setState(() => _index = value);
   }
 
+  void _scheduleFirstLoginTutorial(AppState state) {
+    if (_tutorialScheduled ||
+        _tutorialVisible ||
+        state.isLoading ||
+        !state.shouldShowFirstLoginTutorial) {
+      return;
+    }
+    _tutorialScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      _tutorialScheduled = false;
+      if (!mounted || !state.shouldShowFirstLoginTutorial) return;
+      _tutorialVisible = true;
+      final completed = await showSpeakSyncTutorial(context);
+      _tutorialVisible = false;
+      if (completed) await state.markFirstLoginTutorialCompleted();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = AppStateScope.of(context);
+    _scheduleFirstLoginTutorial(state);
     final pages = <Widget>[
       HomeScreen(onViewProgress: () => setState(() => _index = 1)),
       const ProgressScreen(),

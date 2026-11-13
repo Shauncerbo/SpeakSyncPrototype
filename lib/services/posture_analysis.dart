@@ -50,6 +50,7 @@ class PoseFrameLandmarks {
     required this.rightShoulder,
     required this.leftHip,
     required this.rightHip,
+    this.allPoints = const [],
   });
 
   factory PoseFrameLandmarks.fromMap(Map<Object?, Object?> value) {
@@ -57,11 +58,24 @@ class PoseFrameLandmarks {
       Map<Object?, Object?>.from(value[key]! as Map),
     );
 
+    final rawPoints = value['allLandmarks'];
+    final allPoints = rawPoints is List
+        ? rawPoints
+              .whereType<Map>()
+              .map(
+                (entry) => PoseLandmarkPoint.fromMap(
+                  Map<Object?, Object?>.from(entry),
+                ),
+              )
+              .toList(growable: false)
+        : const <PoseLandmarkPoint>[];
+
     return PoseFrameLandmarks(
       leftShoulder: point('leftShoulder'),
       rightShoulder: point('rightShoulder'),
       leftHip: point('leftHip'),
       rightHip: point('rightHip'),
+      allPoints: allPoints,
     );
   }
 
@@ -69,6 +83,7 @@ class PoseFrameLandmarks {
   final PoseLandmarkPoint rightShoulder;
   final PoseLandmarkPoint leftHip;
   final PoseLandmarkPoint rightHip;
+  final List<PoseLandmarkPoint> allPoints;
 
   Iterable<PoseLandmarkPoint> get points => <PoseLandmarkPoint>[
     leftShoulder,

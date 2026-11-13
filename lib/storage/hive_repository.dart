@@ -152,6 +152,24 @@ class HiveRepository {
   AppPreferences? getPreferences([String userId = AppUserIds.demo]) =>
       _preferences.get(userId);
 
+  bool hasCompletedTutorial(String userId) {
+    _requireId(userId, 'userId');
+    return _metadata.get(
+          StorageMetadataKeys.tutorialCompleted(userId),
+          defaultValue: false,
+        ) ==
+        true;
+  }
+
+  Future<void> markTutorialCompleted(String userId) async {
+    _requireId(userId, 'userId');
+    try {
+      await _metadata.put(StorageMetadataKeys.tutorialCompleted(userId), true);
+    } catch (error) {
+      throw StorageException('Unable to save tutorial progress', error);
+    }
+  }
+
   Future<void> saveSpeechProfile(SpeechProfile profile) async {
     _requireId(profile.speechProfileId, 'speechProfileId');
     _requireId(profile.userId, 'userId');

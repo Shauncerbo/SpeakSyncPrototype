@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/app_theme.dart';
 import '../models/practice_session.dart';
+import '../services/topic_attempt_tracking.dart';
 import '../state/app_state.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/speaking_pace_card.dart';
@@ -15,22 +16,12 @@ class ProgressScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = AppStateScope.of(context);
     final sessions = state.sessions;
-    final rankedSessions =
-        sessions
-            .where((session) => session.validatedOverallScore != null)
-            .toList()
-          ..sort(
-            (a, b) =>
-                b.validatedOverallScore!.compareTo(a.validatedOverallScore!),
-          );
+    final topicGroups = TopicAttemptTracking.groupSessions(sessions);
     final chronologicalSessions = [...sessions]
       ..sort((a, b) => b.dateTime.compareTo(a.dateTime));
     final latestSession = chronologicalSessions.isEmpty
         ? null
         : chronologicalSessions.first;
-    final previousSession = chronologicalSessions.length > 1
-        ? chronologicalSessions[1]
-        : null;
     return SafeArea(
       child: CustomScrollView(
         slivers: [
@@ -99,42 +90,33 @@ class ProgressScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 28),
-                  const SectionHeader('Rehearsal Ranking'),
+                  const SectionHeader('Topics & attempts'),
                   const SizedBox(height: 6),
                   const Text(
-                    'Rankings require a validated scoring policy.',
+                    'Repeated rehearsals are grouped by speech type and topic.',
                     style: TextStyle(color: Color(0xFF617085), fontSize: 13),
                   ),
                   const SizedBox(height: 12),
-                  if (rankedSessions.isEmpty)
+                  if (topicGroups.isEmpty)
                     const InfoBanner(
-                      icon: Icons.emoji_events_outlined,
-                      title: 'Rankings unavailable',
-                      message:
-                          'Overall scoring is not implemented. View measured feedback in Session history.',
+                      icon: Icons.topic_outlined,
+                      title: 'No practiced topics yet',
+                      message: 'Saved rehearsal attempts will be grouped here.',
                     )
                   else
-                    ...rankedSessions.indexed.map(
-                      (entry) => Padding(
+                    ...topicGroups.map(
+                      (group) => Padding(
                         padding: const EdgeInsets.only(bottom: 10),
-                        child: _RankingCard(
-                          rank: entry.$1 + 1,
-                          session: entry.$2,
-                          isBest: entry.$1 == 0,
+                        child: _TopicGroupCard(
+                          group: group,
                           onTap: () => Navigator.of(context).push(
                             MaterialPageRoute<void>(
-                              builder: (_) =>
-                                  SessionDetailsScreen(session: entry.$2),
+                              builder: (_) => TopicAttemptsScreen(group: group),
                             ),
                           ),
                         ),
                       ),
                     ),
-                  const SizedBox(height: 14),
-                  _ImprovementInsightCard(
-                    latestSession: latestSession,
-                    previousSession: previousSession,
-                  ),
                   const SizedBox(height: 12),
                   _WeakestAreaCard(session: latestSession),
                   const SizedBox(height: 26),
@@ -171,52 +153,6 @@ class ProgressScreen extends StatelessWidget {
   }
 }
 
-class _ImprovementInsightCard extends StatelessWidget {
-  const _ImprovementInsightCard({
-    required this.latestSession,
-    required this.previousSession,
-  });
-
-  final PracticeSession? latestSession;
-  final PracticeSession? previousSession;
-
-  @override
-  Widget build(BuildContext context) {
-    final latest = latestSession;
-    final previous = previousSession;
-    final difference =
-        latest?.validatedOverallScore != null &&
-            previous?.validatedOverallScore != null
-        ? latest!.validatedOverallScore! - previous!.validatedOverallScore!
-        : null;
-    final isImprovement = difference != null && difference > 0;
-    final color = difference == null || difference == 0
-        ? primaryBlue
-        : isImprovement
-        ? accentTeal
-        : warningOrange;
-    final message = switch (difference) {
-      null =>
-        'Score improvement is unavailable until a validated scoring policy is implemented.',
-      > 0 => 'You improved by +$difference points from your last rehearsal.',
-      < 0 =>
-        'Your score dropped by $difference points. Try reducing filler words next time.',
-      _ => 'Your score stayed steady. Keep practicing to move it higher.',
-    };
-
-    return _ProgressInsightCard(
-      title: 'Improvement Insight',
-      message: message,
-      icon: isImprovement
-          ? Icons.trending_up_rounded
-          : difference != null && difference < 0
-          ? Icons.trending_down_rounded
-          : Icons.insights_rounded,
-      color: color,
-    );
-  }
-}
-
 class _WeakestAreaCard extends StatelessWidget {
   const _WeakestAreaCard({required this.session});
 
@@ -234,9 +170,12 @@ class _WeakestAreaCard extends StatelessWidget {
       );
     }
 
+    final tips = latest.measuredCoachingTips;
     return _ProgressInsightCard(
       title: 'Practice focus',
-      message: latest.measuredCoachingTips.first,
+      message: tips.isEmpty
+          ? 'No corrective coaching focus was generated from the available measurements.'
+          : tips.first,
       icon: Icons.track_changes_rounded,
       color: accentTeal,
     );
@@ -311,6 +250,8 @@ class _ProgressInsightCard extends StatelessWidget {
   }
 }
 
+// Retained for the future validated cross-session scoring view.
+// ignore: unused_element
 class _RankingCard extends StatelessWidget {
   const _RankingCard({
     required this.rank,
@@ -446,6 +387,431 @@ class _RankingCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _TopicGroupCard extends StatelessWidget {
+  const _TopicGroupCard({required this.group, required this.onTap});
+
+  final TopicAttemptGroup group;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: Color(0xFFE2E8F0)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: primaryBlue.withValues(alpha: .1),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(Icons.topic_outlined, color: primaryBlue),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      group.topic,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: navy,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${group.speechType} • ${group.attempts.length} ${group.attempts.length == 1 ? 'attempt' : 'attempts'}',
+                      style: const TextStyle(
+                        color: Color(0xFF617085),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded, color: Color(0xFF8B98AA)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class TopicAttemptsScreen extends StatelessWidget {
+  const TopicAttemptsScreen({super.key, required this.group});
+
+  final TopicAttemptGroup group;
+
+  @override
+  Widget build(BuildContext context) {
+    final bestAttempt = group.bestAttempt;
+    final bestAttemptNumber = bestAttempt == null
+        ? null
+        : group.attemptNumberFor(bestAttempt.id);
+    final comparisons = group.improvementComparisons;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Topic Attempts')),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: PageFrame(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Topic: ${group.topic}',
+                  key: const Key('topic_attempts_title'),
+                  style: const TextStyle(
+                    color: navy,
+                    fontSize: 25,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '${group.speechType} • ${group.attempts.length} completed ${group.attempts.length == 1 ? 'attempt' : 'attempts'}',
+                  style: const TextStyle(color: Color(0xFF617085)),
+                ),
+                const SizedBox(height: 20),
+                InfoBanner(
+                  icon: group.rankingAvailable
+                      ? Icons.emoji_events_outlined
+                      : Icons.info_outline_rounded,
+                  title: group.rankingAvailable
+                      ? 'Best Attempt: Attempt $bestAttemptNumber'
+                      : 'Ranking unavailable',
+                  message: group.rankingAvailable
+                      ? 'Highest validated Overall Performance Score: ${bestAttempt!.validatedOverallScore}.'
+                      : 'Ranking unavailable until valid scores are available.',
+                  color: group.rankingAvailable ? warningOrange : primaryBlue,
+                ),
+                const SizedBox(height: 26),
+                const SectionHeader('Improvement'),
+                const SizedBox(height: 10),
+                if (group.attempts.length < 2)
+                  const InfoBanner(
+                    icon: Icons.insights_outlined,
+                    title: 'Complete another attempt',
+                    message:
+                        'Comparable improvement appears after this topic is rehearsed again.',
+                  )
+                else if (comparisons.isEmpty)
+                  const InfoBanner(
+                    icon: Icons.insights_outlined,
+                    title: 'Comparable measurements unavailable',
+                    message:
+                        'The first and latest attempts do not share enough measured data. Disabled monitors and unavailable analysis are not treated as zero.',
+                  )
+                else
+                  ...comparisons.map(
+                    (comparison) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _TopicImprovementCard(comparison: comparison),
+                    ),
+                  ),
+                const SizedBox(height: 18),
+                const SectionHeader('Attempt history'),
+                const SizedBox(height: 6),
+                const Text(
+                  'Attempt numbers follow chronological order, not ranking.',
+                  style: TextStyle(color: Color(0xFF617085), fontSize: 13),
+                ),
+                const SizedBox(height: 12),
+                ...group.attempts.indexed.map(
+                  (entry) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _TopicAttemptCard(
+                      attemptNumber: entry.$1 + 1,
+                      session: entry.$2,
+                      isLatest: entry.$1 == group.attempts.length - 1,
+                      isBest: bestAttempt?.id == entry.$2.id,
+                      performanceRank: group.performanceRankFor(entry.$2.id),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) =>
+                              SessionDetailsScreen(session: entry.$2),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                FilledButton.icon(
+                  key: const Key('practice_topic_again'),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => PracticeSetupScreen(
+                        initialSession: group.latestAttempt,
+                      ),
+                    ),
+                  ),
+                  icon: const Icon(Icons.replay_rounded),
+                  label: const Text('Practice This Topic Again'),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 54),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TopicImprovementCard extends StatelessWidget {
+  const _TopicImprovementCard({required this.comparison});
+
+  final TopicMetricComparison comparison;
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, color) = switch (comparison.trend) {
+      TopicMetricTrend.improved => (Icons.trending_up_rounded, accentTeal),
+      TopicMetricTrend.declined => (Icons.trending_down_rounded, warningOrange),
+      TopicMetricTrend.unchanged => (Icons.trending_flat_rounded, primaryBlue),
+    };
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: color),
+            const SizedBox(width: 11),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    comparison.label,
+                    style: const TextStyle(
+                      color: navy,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${comparison.firstValue} → ${comparison.latestValue}',
+                    style: const TextStyle(
+                      color: Color(0xFF334155),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    comparison.summary,
+                    style: const TextStyle(
+                      color: Color(0xFF617085),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TopicAttemptCard extends StatelessWidget {
+  const _TopicAttemptCard({
+    required this.attemptNumber,
+    required this.session,
+    required this.isLatest,
+    required this.isBest,
+    required this.performanceRank,
+    required this.onTap,
+  });
+
+  final int attemptNumber;
+  final PracticeSession session;
+  final bool isLatest;
+  final bool isBest;
+  final int? performanceRank;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final pace = session.monitorPace
+        ? session.speakingPace.wordsPerMinute
+        : null;
+    final fillerAnalysis = session.fillerAnalysis;
+    final fillersAvailable =
+        session.monitorFillers &&
+        fillerAnalysis.hasTranscript &&
+        fillerAnalysis.perMinute != null;
+    return Card(
+      key: Key('topic_attempt_$attemptNumber'),
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: isBest
+              ? warningOrange.withValues(alpha: .65)
+              : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(15),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Attempt $attemptNumber',
+                      style: const TextStyle(
+                        color: navy,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  if (isLatest) const _AttemptBadge(label: 'LATEST'),
+                  if (isBest) ...[
+                    const SizedBox(width: 6),
+                    const _AttemptBadge(label: 'BEST ATTEMPT', best: true),
+                  ],
+                  const SizedBox(width: 4),
+                  const Icon(Icons.chevron_right_rounded),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${formatDate(session.dateTime)} • ${formatDuration(session.duration)}${performanceRank == null ? '' : ' • Rank #$performanceRank'}',
+                style: const TextStyle(color: Color(0xFF617085), fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _AttemptMetric(
+                    label: 'Pace',
+                    value: !session.monitorPace
+                        ? 'Off'
+                        : pace == null
+                        ? 'Unavailable'
+                        : '${pace.round()} WPM',
+                  ),
+                  _AttemptMetric(
+                    label: 'Fillers',
+                    value: !session.monitorFillers
+                        ? 'Off'
+                        : !fillersAvailable
+                        ? 'Unavailable'
+                        : '${fillerAnalysis.total} (${fillerAnalysis.perMinute!.toStringAsFixed(1)}/min)',
+                  ),
+                  _AttemptMetric(
+                    label: 'Posture',
+                    value: !session.monitorBodyLanguage
+                        ? 'Off'
+                        : session.measuredPosturePercentage == null
+                        ? 'Unavailable'
+                        : '${session.measuredPosturePercentage}%',
+                  ),
+                  _AttemptMetric(
+                    label: 'Camera-facing',
+                    value: !session.monitorCameraAttention
+                        ? 'Off'
+                        : session.measuredAttentionPercentage == null
+                        ? 'Unavailable'
+                        : '${session.measuredAttentionPercentage}%',
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AttemptBadge extends StatelessWidget {
+  const _AttemptBadge({required this.label, this.best = false});
+
+  final String label;
+  final bool best;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+    decoration: BoxDecoration(
+      color: (best ? warningOrange : accentTeal).withValues(alpha: .12),
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Text(
+      label,
+      style: TextStyle(
+        color: best ? const Color(0xFF9A5B00) : accentTeal,
+        fontSize: 9,
+        fontWeight: FontWeight.w900,
+      ),
+    ),
+  );
+}
+
+class _AttemptMetric extends StatelessWidget {
+  const _AttemptMetric({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    constraints: const BoxConstraints(minWidth: 118),
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+    decoration: BoxDecoration(
+      color: const Color(0xFFF3F6FA),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(color: Color(0xFF617085), fontSize: 10),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: const TextStyle(
+            color: navy,
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class SessionDetailsScreen extends StatelessWidget {
@@ -618,25 +984,35 @@ class SessionDetailsScreen extends StatelessWidget {
                 const SizedBox(height: 26),
                 const SectionHeader('Coaching tips'),
                 const SizedBox(height: 12),
-                ...session.measuredCoachingTips.map(
-                  (tip) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: InfoBanner(
-                      icon: Icons.lightbulb_outline_rounded,
-                      title: 'Focus point',
-                      message: tip,
+                if (session.measuredCoachingTips.isEmpty)
+                  const InfoBanner(
+                    icon: Icons.check_circle_outline_rounded,
+                    title: 'No corrective tips',
+                    message:
+                        'No corrective coaching tip was generated from the available measurements.',
+                  )
+                else
+                  ...session.measuredCoachingTips.map(
+                    (tip) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: InfoBanner(
+                        icon: Icons.lightbulb_outline_rounded,
+                        title: 'Focus point',
+                        message: tip,
+                      ),
                     ),
                   ),
-                ),
                 const SizedBox(height: 18),
                 FilledButton.icon(
+                  key: const Key('practice_topic_again_details'),
                   onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                      builder: (_) => const PracticeSetupScreen(),
+                      builder: (_) =>
+                          PracticeSetupScreen(initialSession: session),
                     ),
                   ),
                   icon: const Icon(Icons.replay_rounded),
-                  label: const Text('Practice Again'),
+                  label: const Text('Practice This Topic Again'),
                   style: FilledButton.styleFrom(
                     minimumSize: const Size(double.infinity, 54),
                   ),

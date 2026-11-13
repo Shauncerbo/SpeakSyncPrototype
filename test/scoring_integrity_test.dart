@@ -168,8 +168,9 @@ void main() {
     expect(find.text('+6 pts'), findsNothing);
     await render(tester, const ProgressScreen(), state);
     expect(find.text('Not scored'), findsOneWidget);
-    expect(find.text('Rankings unavailable'), findsOneWidget);
+    expect(find.text('Topics & attempts'), findsOneWidget);
     expect(find.text('BEST REHEARSAL'), findsNothing);
+    expect(find.textContaining('Best Attempt'), findsNothing);
     expect(find.text('#1'), findsNothing);
     expect(tester.takeException(), isNull);
   });

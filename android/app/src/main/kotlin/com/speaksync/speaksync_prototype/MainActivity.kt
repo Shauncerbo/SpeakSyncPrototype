@@ -207,6 +207,10 @@ class MainActivity : FlutterActivity() {
                 "rightShoulder" to landmark(12),
                 "leftHip" to landmark(23),
                 "rightHip" to landmark(24),
+                // Flutter keeps the four fields above for the established
+                // posture calculation. The complete list is used only by the
+                // optional experimental skeleton/full-body visualization.
+                "allLandmarks" to pose.mapIndexed { index, _ -> landmark(index) },
             ), result.timestampMs(),
         )
     }

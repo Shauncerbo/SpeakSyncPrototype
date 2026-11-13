@@ -5,6 +5,42 @@ import 'package:flutter/material.dart';
 
 import '../services/posture_analysis.dart';
 
+const poseSkeletonConnections = <(int, int)>[
+  (0, 1),
+  (1, 2),
+  (2, 3),
+  (3, 7),
+  (0, 4),
+  (4, 5),
+  (5, 6),
+  (6, 8),
+  (9, 10),
+  (11, 12),
+  (11, 13),
+  (13, 15),
+  (15, 17),
+  (15, 19),
+  (15, 21),
+  (12, 14),
+  (14, 16),
+  (16, 18),
+  (16, 20),
+  (16, 22),
+  (11, 23),
+  (12, 24),
+  (23, 24),
+  (23, 25),
+  (25, 27),
+  (27, 29),
+  (29, 31),
+  (27, 31),
+  (24, 26),
+  (26, 28),
+  (28, 30),
+  (30, 32),
+  (28, 32),
+];
+
 class PoseOverlayFrame {
   const PoseOverlayFrame({
     required this.landmarks,
@@ -101,15 +137,15 @@ class PoseLandmarkPainter extends CustomPainter {
       frame.imageWidth.toDouble(),
       frame.imageHeight.toDouble(),
     );
-    final points = <PoseLandmarkPoint>[
-      frame.landmarks.leftShoulder,
-      frame.landmarks.rightShoulder,
-      frame.landmarks.leftHip,
-      frame.landmarks.rightHip,
-    ];
-    if (points.any((point) => point.visibility < minimumVisibility)) {
-      return;
-    }
+    final hasFullPose = frame.landmarks.allPoints.length >= 33;
+    final points = hasFullPose
+        ? frame.landmarks.allPoints
+        : <PoseLandmarkPoint>[
+            frame.landmarks.leftShoulder,
+            frame.landmarks.rightShoulder,
+            frame.landmarks.leftHip,
+            frame.landmarks.rightHip,
+          ];
 
     Offset position(PoseLandmarkPoint point) =>
         PoseOverlayTransform.landmarkToCanvas(
@@ -121,26 +157,33 @@ class PoseLandmarkPainter extends CustomPainter {
 
     final positions = points.map(position).toList(growable: false);
     final linePaint = Paint()
-      ..color = const Color(0xE600E5C4)
-      ..strokeWidth = 3
+      ..color = const Color(0xF200E5C4)
+      ..strokeWidth = 3.2
+      ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
     final pointPaint = Paint()
-      ..color = const Color(0xFF8CFFE9)
+      ..color = const Color(0xFFFFFFFF)
       ..style = PaintingStyle.fill;
-    for (final connection in const <(int, int)>[
-      (0, 1),
-      (0, 2),
-      (1, 3),
-      (2, 3),
-    ]) {
+    final connections = hasFullPose
+        ? poseSkeletonConnections
+        : const <(int, int)>[(0, 1), (0, 2), (1, 3), (2, 3)];
+    for (final connection in connections) {
+      if (connection.$1 >= points.length || connection.$2 >= points.length) {
+        continue;
+      }
+      if (points[connection.$1].visibility < minimumVisibility ||
+          points[connection.$2].visibility < minimumVisibility) {
+        continue;
+      }
       canvas.drawLine(
         positions[connection.$1],
         positions[connection.$2],
         linePaint,
       );
     }
-    for (final point in positions) {
-      canvas.drawCircle(point, 5, pointPaint);
+    for (var index = 0; index < positions.length; index++) {
+      if (points[index].visibility < minimumVisibility) continue;
+      canvas.drawCircle(positions[index], hasFullPose ? 3.8 : 5, pointPaint);
     }
   }
 
@@ -151,8 +194,8 @@ class PoseLandmarkPainter extends CustomPainter {
 }
 
 class PoseOverlayDebugToggle extends StatelessWidget {
-  /// Developer diagnostic component. The student rehearsal UI intentionally
-  /// does not mount this control or [PoseLandmarkOverlay].
+  /// Developer diagnostic component retained separately from the student
+  /// full-body setting. Normal upper-body rehearsals do not mount the overlay.
   const PoseOverlayDebugToggle({
     super.key,
     required this.value,

@@ -14,6 +14,7 @@ import '../models/practice_session.dart';
 import '../models/practice_settings.dart';
 import '../services/groq_transcription_service.dart';
 import '../services/filler_analysis.dart';
+import '../services/full_body_framing.dart';
 import '../services/live_filler_feedback_service.dart';
 import '../services/internet_connectivity_service.dart';
 import '../services/rehearsal_audio_recorder.dart';
@@ -23,6 +24,7 @@ import '../services/camera_framing.dart';
 import '../services/camera_framing_warning_controller.dart';
 import '../services/camera_framing_summary.dart';
 import '../widgets/live_feedback_overlay.dart';
+import '../widgets/pose_landmark_overlay.dart';
 import '../services/posture_analysis.dart';
 import '../services/face_attention.dart';
 import '../services/posture_landmarker_service.dart';
@@ -37,7 +39,11 @@ import '../widgets/filler_frequency_card.dart';
 import 'main_shell.dart';
 
 class PracticeSetupScreen extends StatefulWidget {
-  const PracticeSetupScreen({super.key});
+  const PracticeSetupScreen({super.key, this.initialSession});
+
+  /// A saved rehearsal used only to prefill a new, separate attempt.
+  /// The existing session is never edited or overwritten.
+  final PracticeSession? initialSession;
 
   @override
   State<PracticeSetupScreen> createState() => _PracticeSetupScreenState();
@@ -51,6 +57,8 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
   String? _languageMode;
   String? _duration;
   bool _body = true;
+  bool _fullBodyFraming = false;
+  bool _showPoseSkeleton = false;
   bool _cameraAttention = true;
   bool _fillers = true;
   bool _pace = true;
@@ -85,6 +93,21 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
     _fillers = preferences.fillerMonitoring;
     _pace = preferences.paceMonitoring;
     _live = preferences.liveFeedback;
+    final initialSession = widget.initialSession;
+    if (initialSession != null) {
+      _titleController.text = initialSession.title;
+      if (_speechTypes.contains(initialSession.speechType)) {
+        _speechType = initialSession.speechType;
+      }
+      if (_languages.contains(initialSession.languageMode)) {
+        _languageMode = initialSession.languageMode;
+      }
+      if (initialSession.speechType == 'Prepared' ||
+          initialSession.speechType == 'Persuasive') {
+        _speechContentController.text = initialSession.referenceScript ?? '';
+        _referenceDocumentName = initialSession.referenceDocumentName;
+      }
+    }
     _loadedPreferences = true;
   }
 
@@ -112,6 +135,8 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
       monitorFillers: _fillers,
       monitorPace: _pace,
       enableLiveFeedback: _live,
+      fullBodyFraming: _fullBodyFraming,
+      showPoseSkeleton: _showPoseSkeleton,
     );
     AppStateScope.of(context, listen: false).setCurrentSetup(settings);
     Navigator.of(
@@ -406,8 +431,44 @@ class _PracticeSetupScreenState extends State<PracticeSetupScreen> {
                             Icons.accessibility_new_rounded,
                           ),
                           value: _body,
-                          onChanged: (value) => setState(() => _body = value),
+                          onChanged: (value) => setState(() {
+                            _body = value;
+                            if (!value) {
+                              _fullBodyFraming = false;
+                              _showPoseSkeleton = false;
+                            }
+                          }),
                         ),
+                        if (_body) ...[
+                          const Divider(height: 1, indent: 16, endIndent: 16),
+                          SwitchListTile(
+                            key: const Key('full_body_framing'),
+                            title: const Text('Full-body framing'),
+                            subtitle: const Text(
+                              'Experimental · stand far enough to show head to feet',
+                            ),
+                            secondary: const Icon(Icons.accessibility_rounded),
+                            value: _fullBodyFraming,
+                            onChanged: (value) => setState(() {
+                              _fullBodyFraming = value;
+                              _showPoseSkeleton = value;
+                            }),
+                          ),
+                          if (_fullBodyFraming) ...[
+                            const Divider(height: 1, indent: 16, endIndent: 16),
+                            SwitchListTile(
+                              key: const Key('show_live_skeleton'),
+                              title: const Text('Show live skeleton'),
+                              subtitle: const Text(
+                                'Visual guide only · does not change posture scores',
+                              ),
+                              secondary: const Icon(Icons.hub_outlined),
+                              value: _showPoseSkeleton,
+                              onChanged: (value) =>
+                                  setState(() => _showPoseSkeleton = value),
+                            ),
+                          ],
+                        ],
                         const Divider(height: 1, indent: 16, endIndent: 16),
                         SwitchListTile(
                           key: const Key('camera_attention_monitoring'),
@@ -728,6 +789,7 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
             if (setup.monitorFillers) 'Filler words',
             if (setup.monitorPace) 'Speaking pace',
             if (setup.monitorBodyLanguage) 'Posture',
+            if (setup.fullBodyFraming) 'Full-body framing (experimental)',
             if (setup.monitorCameraAttention) 'Head direction',
           ];
     return Scaffold(
@@ -815,24 +877,26 @@ class _DeviceCheckScreenState extends State<DeviceCheckScreen> {
                 const SizedBox(height: 24),
                 const SectionHeader('Before you begin'),
                 const SizedBox(height: 12),
-                const Card(
+                Card(
                   child: Padding(
-                    padding: EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(16),
                     child: Column(
                       children: [
                         _Instruction(
                           icon: Icons.face_retouching_natural,
-                          text: 'Keep face and upper body visible',
+                          text: setup?.fullBodyFraming == true
+                              ? 'Keep your complete body visible, head to feet'
+                              : 'Keep face and upper body visible',
                         ),
-                        _Instruction(
+                        const _Instruction(
                           icon: Icons.volume_down_outlined,
                           text: 'Use a reasonably quiet place',
                         ),
-                        _Instruction(
+                        const _Instruction(
                           icon: Icons.stay_current_portrait_rounded,
                           text: 'Keep phone stable',
                         ),
-                        _Instruction(
+                        const _Instruction(
                           icon: Icons.center_focus_strong_rounded,
                           text: 'Look toward the camera',
                         ),
@@ -953,6 +1017,7 @@ double _cameraFrameWidth(BuildContext context) {
 
 class _ReadinessCard extends StatelessWidget {
   const _ReadinessCard({
+    required this.fullBodyFraming,
     required this.busy,
     required this.starting,
     required this.onReady,
@@ -966,6 +1031,7 @@ class _ReadinessCard extends StatelessWidget {
     required this.onOpenSettings,
   });
 
+  final bool fullBodyFraming;
   final bool busy;
   final bool starting;
   final VoidCallback onReady;
@@ -1006,9 +1072,11 @@ class _ReadinessCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          const Text(
-            'Keep your face and upper body in frame. Adjust your phone, lighting, and posture.',
-            style: TextStyle(color: Color(0xFFBDD0E2), height: 1.5),
+          Text(
+            fullBodyFraming
+                ? 'Place the phone far enough away to show your complete body from head to feet. The skeleton starts after the countdown.'
+                : 'Keep your face and upper body in frame. Adjust your phone, lighting, and posture.',
+            style: const TextStyle(color: Color(0xFFBDD0E2), height: 1.5),
           ),
           const SizedBox(height: 10),
           const Text(
@@ -1266,6 +1334,8 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   late final PostureLandmarker _postureLandmarker;
   late final PostureSessionTracker _postureTracker;
   late final CameraFramingTracker _cameraFramingTracker;
+  final FullBodyFramingAnalyzer _fullBodyFramingAnalyzer =
+      const FullBodyFramingAnalyzer();
   late final CameraFramingSummaryTracker _framingSummary;
   late final PostureWarningController _postureWarningController;
   final CameraFramingWarningController _framingWarningController =
@@ -1287,6 +1357,11 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
   );
   final ValueNotifier<CameraFramingState> _cameraFramingStatus = ValueNotifier(
     CameraFramingState.unavailable,
+  );
+  final ValueNotifier<FullBodyFramingState> _fullBodyFramingStatus =
+      ValueNotifier(FullBodyFramingState.unavailable);
+  final ValueNotifier<PoseOverlayFrame?> _poseOverlayFrame = ValueNotifier(
+    null,
   );
   final ValueNotifier<PostureWarningType?> _postureWarning = ValueNotifier(
     null,
@@ -2039,6 +2114,8 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     _cameraFramingTracker.reset();
     _framingSummary.interrupt();
     _cameraFramingStatus.value = CameraFramingState.unavailable;
+    _fullBodyFramingStatus.value = FullBodyFramingState.unavailable;
+    _poseOverlayFrame.value = null;
     _framingWarningController.reset();
     _framingWarning.value = null;
     final controller = _cameraController;
@@ -2076,6 +2153,8 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     _postureFrameGate.reset();
     _postureDiagnostics.reset();
     _cameraFramingStatus.value = CameraFramingState.unavailable;
+    _fullBodyFramingStatus.value = FullBodyFramingState.unavailable;
+    _poseOverlayFrame.value = null;
     _postureWarning.value = null;
     _posture = 'Position yourself';
     _postureStatus.value = _posture;
@@ -2168,6 +2247,29 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
       }
       if (!setup.monitorBodyLanguage) return;
       final landmarks = result.landmarks;
+      if (setup.fullBodyFraming) {
+        final fullBodyState = _fullBodyFramingAnalyzer.analyze(landmarks);
+        if (_fullBodyFramingStatus.value != fullBodyState) {
+          _fullBodyFramingStatus.value = fullBodyState;
+        }
+        _poseOverlayFrame.value =
+            setup.showPoseSkeleton &&
+                landmarks != null &&
+                result.inferenceWidth > 0 &&
+                result.inferenceHeight > 0
+            ? PoseOverlayFrame(
+                landmarks: landmarks,
+                imageWidth: result.inferenceWidth,
+                imageHeight: result.inferenceHeight,
+                mirrorHorizontally:
+                    controller.description.lensDirection ==
+                    CameraLensDirection.front,
+              )
+            : null;
+      } else {
+        _fullBodyFramingStatus.value = FullBodyFramingState.unavailable;
+        _poseOverlayFrame.value = null;
+      }
       final frameClassification = _postureTracker.analyzer
           .analyze(landmarks)
           .classification;
@@ -2195,20 +2297,33 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
         _postureWarning.value = warningUpdate.warning;
       }
 
-      final framing = _cameraFramingTracker.update(landmarks).state;
-      _framingSummary.addFrame(framing, _postureClock.elapsed);
-      _framingWarning.value = _framingWarningController.update(
-        framing,
-        _postureClock.elapsed,
-      );
-      if (_cameraFramingStatus.value != framing) {
-        _cameraFramingStatus.value = framing;
+      if (setup.fullBodyFraming) {
+        // The established camera-framing thresholds are upper-body specific.
+        // Do not mislabel or save them while experimental full-body framing is
+        // selected. Existing posture calculations above remain unchanged.
+        _cameraFramingStatus.value = CameraFramingState.unavailable;
+        _framingWarning.value = null;
+        _framingSummary.interrupt();
+      } else {
+        final framing = _cameraFramingTracker.update(landmarks).state;
+        _framingSummary.addFrame(framing, _postureClock.elapsed);
+        _framingWarning.value = _framingWarningController.update(
+          framing,
+          _postureClock.elapsed,
+        );
+        if (_cameraFramingStatus.value != framing) {
+          _cameraFramingStatus.value = framing;
+        }
       }
     } catch (_) {
       // A dropped/invalid frame is not bad posture. Keep the rehearsal alive
       // and let subsequent camera frames recover. Avoid frame-loop log spam.
       if (mounted && generation == _postureGeneration) _interruptFaceAnalysis();
-      if (generation == _postureGeneration) _framingSummary.interrupt();
+      if (generation == _postureGeneration) {
+        _framingSummary.interrupt();
+        _fullBodyFramingStatus.value = FullBodyFramingState.unavailable;
+        _poseOverlayFrame.value = null;
+      }
     } finally {
       if (generation == _postureGeneration) _postureFrameGate.complete();
     }
@@ -2664,6 +2779,8 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
     await _cameraController?.dispose();
     _postureStatus.dispose();
     _cameraFramingStatus.dispose();
+    _fullBodyFramingStatus.dispose();
+    _poseOverlayFrame.dispose();
     _postureWarning.dispose();
     _framingWarning.dispose();
     _faceMissingWarning.dispose();
@@ -2774,6 +2891,22 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                                   cameraReady: _cameraReady,
                                   cameraEnabled: _cameraEnabled,
                                   cameraStatus: _cameraStatus,
+                                  poseOverlay:
+                                      setup.fullBodyFraming &&
+                                          setup.showPoseSkeleton &&
+                                          _hasStarted &&
+                                          _cameraEnabled
+                                      ? PoseLandmarkOverlay(
+                                          frames: _poseOverlayFrame,
+                                          minimumVisibility: .45,
+                                        )
+                                      : null,
+                                  fullBodyStatus:
+                                      setup.fullBodyFraming &&
+                                          _hasStarted &&
+                                          _cameraEnabled
+                                      ? _fullBodyFramingStatus
+                                      : null,
                                   recording:
                                       _hasStarted &&
                                       _recording &&
@@ -2838,6 +2971,7 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                       ),
                       if (!_hasStarted) ...[
                         _ReadinessCard(
+                          fullBodyFraming: setup.fullBodyFraming,
                           busy:
                               _starting ||
                               _checkingReadiness ||
@@ -2914,35 +3048,58 @@ class _RehearsalScreenState extends State<RehearsalScreen> {
                                 },
                               ),
                             ),
-                            ValueListenableBuilder<CameraFramingState>(
-                              valueListenable: _cameraFramingStatus,
-                              builder: (context, framing, child) => _LiveMetric(
-                                key: const Key('camera_position_metric'),
-                                label: 'Camera Position',
-                                value: setup.monitorBodyLanguage
-                                    ? cameraFramingLabel(framing)
-                                    : 'Off',
-                                icon: Icons.fit_screen_rounded,
-                                good: framing == CameraFramingState.proper,
-                                enabled: setup.monitorBodyLanguage,
-                                progress: switch (framing) {
-                                  CameraFramingState.tooClose => .2,
-                                  CameraFramingState.proper => .5,
-                                  CameraFramingState.tooFar => .8,
-                                  CameraFramingState.unavailable => 0,
-                                },
-                                description: switch (framing) {
-                                  CameraFramingState.tooClose =>
-                                    'Move slightly farther away',
-                                  CameraFramingState.proper =>
-                                    'Upper body is framed well',
-                                  CameraFramingState.tooFar =>
-                                    'Move slightly closer',
-                                  CameraFramingState.unavailable =>
-                                    'Keep shoulders and hips visible',
-                                },
+                            if (setup.fullBodyFraming)
+                              ValueListenableBuilder<FullBodyFramingState>(
+                                valueListenable: _fullBodyFramingStatus,
+                                builder: (context, framing, child) =>
+                                    _LiveMetric(
+                                      key: const Key('full_body_metric'),
+                                      label: 'Full-Body Framing',
+                                      value: fullBodyFramingLabel(framing),
+                                      icon: Icons.accessibility_rounded,
+                                      good:
+                                          framing ==
+                                          FullBodyFramingState.detected,
+                                      enabled:
+                                          framing !=
+                                          FullBodyFramingState.unavailable,
+                                      progress: null,
+                                      description:
+                                          'Experimental visibility guide only',
+                                    ),
+                              )
+                            else
+                              ValueListenableBuilder<CameraFramingState>(
+                                valueListenable: _cameraFramingStatus,
+                                builder: (context, framing, child) =>
+                                    _LiveMetric(
+                                      key: const Key('camera_position_metric'),
+                                      label: 'Camera Position',
+                                      value: setup.monitorBodyLanguage
+                                          ? cameraFramingLabel(framing)
+                                          : 'Off',
+                                      icon: Icons.fit_screen_rounded,
+                                      good:
+                                          framing == CameraFramingState.proper,
+                                      enabled: setup.monitorBodyLanguage,
+                                      progress: switch (framing) {
+                                        CameraFramingState.tooClose => .2,
+                                        CameraFramingState.proper => .5,
+                                        CameraFramingState.tooFar => .8,
+                                        CameraFramingState.unavailable => 0,
+                                      },
+                                      description: switch (framing) {
+                                        CameraFramingState.tooClose =>
+                                          'Move slightly farther away',
+                                        CameraFramingState.proper =>
+                                          'Upper body is framed well',
+                                        CameraFramingState.tooFar =>
+                                          'Move slightly closer',
+                                        CameraFramingState.unavailable =>
+                                          'Keep shoulders and hips visible',
+                                      },
+                                    ),
                               ),
-                            ),
                             ValueListenableBuilder<FaceAttentionState>(
                               valueListenable: _faceStatus,
                               builder: (context, face, child) => _LiveMetric(
@@ -3122,6 +3279,8 @@ class _CameraStage extends StatelessWidget {
     required this.cameraStatus,
     required this.recording,
     required this.feedback,
+    this.poseOverlay,
+    this.fullBodyStatus,
   });
 
   final CameraController? controller;
@@ -3130,6 +3289,8 @@ class _CameraStage extends StatelessWidget {
   final String cameraStatus;
   final bool recording;
   final Widget feedback;
+  final Widget? poseOverlay;
+  final ValueListenable<FullBodyFramingState>? fullBodyStatus;
 
   @override
   Widget build(BuildContext context) {
@@ -3258,7 +3419,9 @@ class _CameraStage extends StatelessWidget {
         child: AspectRatio(
           aspectRatio: aspectRatio,
           child: Semantics(
-            label: 'Live rehearsal camera. Keep your face and waist visible.',
+            label: fullBodyStatus == null
+                ? 'Live rehearsal camera. Keep your face and waist visible.'
+                : 'Live rehearsal camera with experimental full-body framing.',
             child: Container(
               clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
@@ -3273,7 +3436,22 @@ class _CameraStage extends StatelessWidget {
                     color: const Color(0xFF071526),
                     child: SizedBox.expand(child: preview),
                   ),
+                  if (poseOverlay != null)
+                    Positioned.fill(
+                      key: const Key('live_pose_skeleton'),
+                      child: poseOverlay!,
+                    ),
                   Positioned.fill(child: feedback),
+                  if (fullBodyStatus != null)
+                    Positioned(
+                      right: 14,
+                      bottom: showRecordingBadge ? 52 : 14,
+                      child: ValueListenableBuilder<FullBodyFramingState>(
+                        valueListenable: fullBodyStatus!,
+                        builder: (context, state, child) =>
+                            _FullBodyStatusBadge(state: state),
+                      ),
+                    ),
                   if (showRecordingBadge)
                     Positioned(
                       right: 14,
@@ -3308,6 +3486,57 @@ class _CameraStage extends StatelessWidget {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FullBodyStatusBadge extends StatelessWidget {
+  const _FullBodyStatusBadge({required this.state});
+
+  final FullBodyFramingState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final detected = state == FullBodyFramingState.detected;
+    final color = detected ? successGreen : warningOrange;
+    return Semantics(
+      liveRegion: true,
+      label: fullBodyFramingLabel(state),
+      child: Container(
+        key: const Key('full_body_detection_status'),
+        constraints: const BoxConstraints(maxWidth: 190),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: const Color(0xE6142535),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: color.withValues(alpha: .75)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              detected
+                  ? Icons.check_circle_rounded
+                  : Icons.accessibility_new_rounded,
+              color: color,
+              size: 16,
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                fullBodyFramingLabel(state),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -3758,6 +3987,36 @@ class _ReportScreenState extends State<ReportScreen> {
     }
   }
 
+  Future<void> _practiceTopicAgain(PracticeSession report) async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      if (!_saved) {
+        await AppStateScope.of(context, listen: false).saveCurrentReport();
+      }
+      if (!mounted) return;
+      setState(() {
+        _saved = true;
+        _saving = false;
+      });
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => PracticeSetupScreen(initialSession: report),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Save this attempt before practicing the topic again: $error',
+          ),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final report = AppStateScope.of(context).currentReport;
@@ -3985,17 +4244,26 @@ class _ReportScreenState extends State<ReportScreen> {
                 const SizedBox(height: 28),
                 const SectionHeader('Coaching tips'),
                 const SizedBox(height: 12),
-                ...report.measuredCoachingTips.map(
-                  (tip) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: InfoBanner(
-                      icon: Icons.lightbulb_outline_rounded,
-                      title: 'Try this next time',
-                      message: tip,
-                      color: primaryBlue,
+                if (report.measuredCoachingTips.isEmpty)
+                  const InfoBanner(
+                    icon: Icons.check_circle_outline_rounded,
+                    title: 'No corrective tips',
+                    message:
+                        'No corrective coaching tip was generated from the available measurements.',
+                    color: primaryBlue,
+                  )
+                else
+                  ...report.measuredCoachingTips.map(
+                    (tip) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: InfoBanner(
+                        icon: Icons.lightbulb_outline_rounded,
+                        title: 'Try this next time',
+                        message: tip,
+                        color: primaryBlue,
+                      ),
                     ),
                   ),
-                ),
                 const SizedBox(height: 16),
                 FilledButton.icon(
                   key: const Key('save_progress'),
@@ -4018,13 +4286,10 @@ class _ReportScreenState extends State<ReportScreen> {
                 ),
                 const SizedBox(height: 10),
                 OutlinedButton.icon(
-                  onPressed: () => Navigator.of(context).pushReplacement(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const PracticeSetupScreen(),
-                    ),
-                  ),
+                  key: const Key('practice_topic_again_report'),
+                  onPressed: _saving ? null : () => _practiceTopicAgain(report),
                   icon: const Icon(Icons.replay_rounded),
-                  label: const Text('Practice Again'),
+                  label: const Text('Practice This Topic Again'),
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size(double.infinity, 52),
                   ),

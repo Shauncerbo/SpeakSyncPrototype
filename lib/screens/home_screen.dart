@@ -216,7 +216,10 @@ String _coachingTip(PracticeSession? session) {
   if (session == null) {
     return 'Complete a rehearsal to receive a personalized coaching tip.';
   }
-  return session.measuredCoachingTips.first;
+  final tips = session.measuredCoachingTips;
+  return tips.isEmpty
+      ? 'No corrective coaching tip was generated from the available measurements.'
+      : tips.first;
 }
 
 void _showWeeklyGoalInfo(BuildContext context) {
